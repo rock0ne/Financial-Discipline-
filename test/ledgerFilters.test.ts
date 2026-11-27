@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Transaction } from '../src/types/finance';
 import {
+  applyBatchTransactionUpdate,
   describeParsedSearchFilters,
   matchesLedgerSearch,
   mergeTransactionTags,
@@ -137,5 +138,36 @@ describe('ledgerFilters & custom transaction tagging', () => {
     assert.ok(csv.includes(',SmartTags,CustomTags,Account,'));
     assert.ok(csv.includes('"Work; Reimbursable"'));
     assert.ok(csv.includes('"Shared; Weekly Shop"'));
+  });
+
+  it('batch updates categories and tags across multiple selected transactions cleanly', () => {
+    const selected = new Set(['tx-2', 'tx-3']);
+    const { transactions: updated, updatedCount } = applyBatchTransactionUpdate(
+      SAMPLE_TXS,
+      selected,
+      {
+        category: 'dining_takeaway',
+        addTag: 'Client Trip',
+      }
+    );
+
+    assert.equal(updatedCount, 2);
+    // Unselected transactions remain untouched
+    assert.equal(updated[0].category, 'groceries');
+    assert.deepEqual(updated[0].tags, ['Shared', 'Weekly Shop']);
+    // Selected transactions get updated category, default spendingClass, and merged custom tag
+    assert.equal(updated[1].category, 'dining_takeaway');
+    assert.equal(updated[1].spendingClass, 'non-essential');
+    assert.deepEqual(updated[1].tags, ['Work', 'Reimbursable', 'Client Trip']);
+    assert.equal(updated[2].category, 'dining_takeaway');
+    assert.deepEqual(updated[2].tags, ['Work', 'Client Trip']);
+
+    // Batch remove tag
+    const removed = applyBatchTransactionUpdate(updated, selected, {
+      removeTag: 'work',
+    });
+    assert.equal(removed.updatedCount, 2);
+    assert.deepEqual(removed.transactions[1].tags, ['Reimbursable', 'Client Trip']);
+    assert.deepEqual(removed.transactions[2].tags, ['Client Trip']);
   });
 });

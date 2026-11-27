@@ -9,6 +9,7 @@ import {
 import {
   analyzeLedgerSmartTags,
   computeTopMerchantsByCategoryOverTime,
+  computeTwentyFourMonthSpendingTrend,
   runLocalFinancialAnalytics,
 } from '../src/utils/analyticsEngine';
 import { exportTransactionsToCsv } from '../src/utils/statementParser';
@@ -259,5 +260,31 @@ describe('pdfReportGenerator (jsPDF analytical findings & ledger summary)', () =
     assert.ok(report.subscriptionAnnualProjection.itemCount >= 1);
     assert.ok(doc.output('datauristring').startsWith('data:application/pdf'));
     assert.ok(doc.getNumberOfPages() >= 1);
+  });
+
+  it('computes a continuous 24-month yearly spending trend with rolling average and YoY pace', () => {
+    const txs: Transaction[] = [];
+    // Populate 24 consecutive months: Year 1 (2024-12..2025-11) = £1,000/mo, Year 2 (2025-12..2026-11) = £900/mo (-10% YoY)
+    for (let i = 0; i < 24; i++) {
+      const totalIdx = 2024 * 12 + 11 + i; // starts at 2024-12
+      const y = Math.floor(totalIdx / 12);
+      const m = (totalIdx % 12) + 1;
+      const dateStr = `${y}-${String(m).padStart(2, '0')}-10`;
+      const isSecondYear = i >= 12;
+      txs.push(makeTx(dateStr, 'Landlord', 'housing', isSecondYear ? -600 : -650));
+      txs.push(makeTx(dateStr, 'Dining', 'dining_takeaway', isSecondYear ? -300 : -350));
+    }
+
+    const trend = computeTwentyFourMonthSpendingTrend(txs, 'GBP', undefined, 24);
+    assert.equal(trend.points.length, 24);
+    assert.equal(trend.observedMonthsCount, 24);
+    assert.equal(trend.points[0].monthKey, '2024-12');
+    assert.equal(trend.points[23].monthKey, '2026-11');
+    assert.equal(trend.priorYearAvg, 1000);
+    assert.equal(trend.recentYearAvg, 900);
+    assert.equal(trend.yoyDeltaPct, -10);
+    assert.equal(trend.totalExpenditure, 22800);
+    assert.equal(trend.monthlyAverage, 950);
+    assert.equal(trend.points[23].rolling3mAvg, 900);
   });
 });

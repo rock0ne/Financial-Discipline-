@@ -1,7 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { RecurringItem } from '../src/types/finance';
-import { computeSubscriptionAnnualProjection } from '../src/utils/analyticsEngine';
+import {
+  computeSubscriptionAnnualProjection,
+  computeSubscriptionCalendarMonth,
+} from '../src/utils/analyticsEngine';
 
 const SAMPLE_RECURRING: RecurringItem[] = [
   {
@@ -96,5 +99,39 @@ describe('computeSubscriptionAnnualProjection', () => {
     assert.equal(proj.months.length, 12);
     assert.equal(proj.months[11].cumulativeBaseline, 0);
     assert.deepEqual(proj.topCategories, []);
+  });
+
+  it('maps upcoming charge dates onto calendar days using cadence and recurringActions overrides', () => {
+    // December 2026 (monthIndex 11): monthly bills land on day 15 and day 18;
+    // quarterly bill last billed 2026-11-01 should NOT land in Dec 2026, but SHOULD land in Feb 2027 (monthIndex 1)
+    const dec = computeSubscriptionCalendarMonth(
+      SAMPLE_RECURRING,
+      {
+        'rec-energy': 'downgrade', // -35% -> 73.09
+        'rec-netflix': 'cancel', // 0 active
+      },
+      2026,
+      11
+    );
+
+    assert.equal(dec.monthKey, '2026-12');
+    assert.equal(dec.events.length, 2);
+    assert.equal(dec.eventsByDay[15]?.[0].merchant, 'Octopus Energy');
+    assert.equal(dec.eventsByDay[15]?.[0].action, 'downgrade');
+    assert.equal(dec.eventsByDay[15]?.[0].effectiveAmount, 73.09);
+    assert.equal(dec.eventsByDay[18]?.[0].merchant, 'Netflix');
+    assert.equal(dec.eventsByDay[18]?.[0].action, 'cancel');
+    assert.equal(dec.eventsByDay[18]?.[0].effectiveAmount, 0);
+    assert.equal(dec.totalScheduled, 130.44);
+    assert.equal(dec.activeScheduled, 73.09);
+    assert.equal(dec.savedInMonth, 57.35);
+    assert.equal(dec.downgradeCount, 1);
+    assert.equal(dec.cancelCount, 1);
+
+    // February 2027 (monthIndex 1): 3 months after Nov 2026 -> quarterly Thames Water (£120) appears on day 1
+    const feb = computeSubscriptionCalendarMonth(SAMPLE_RECURRING, {}, 2027, 1);
+    assert.equal(feb.events.length, 3);
+    assert.equal(feb.eventsByDay[1]?.[0].merchant, 'Thames Water');
+    assert.equal(feb.eventsByDay[1]?.[0].scheduledAmount, 120);
   });
 });

@@ -7,11 +7,15 @@ import {
   FileText,
   Printer,
   ShieldCheck,
+  TrendingUp,
 } from 'lucide-react';
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -30,8 +34,10 @@ import {
 } from '../types/finance';
 import {
   computeTopMerchantsByCategoryOverTime,
+  computeTwentyFourMonthSpendingTrend,
   formatMonthLabel,
   type AnalyticsResult,
+  type TwentyFourMonthTrendPoint,
 } from '../utils/analyticsEngine';
 import {
   buildMonthlyReportData,
@@ -91,6 +97,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [merchantCategoryFilter, setMerchantCategoryFilter] = useState<CategoryId | 'all'>('all');
   const [merchantChartMode, setMerchantChartMode] = useState<'stacked' | 'grouped'>('stacked');
+  const [trendChartMode, setTrendChartMode] = useState<'total' | 'split'>('total');
 
   const applyExportPreset = (
     preset: 'current_month_projections' | 'full' | 'executive' | 'ledger'
@@ -207,6 +214,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         12
       ),
     [transactions, merchantCategoryFilter, currency, exchangeRates]
+  );
+
+  const yearlySpendingTrend = useMemo(
+    () => computeTwentyFourMonthSpendingTrend(transactions, currency, exchangeRates, 24),
+    [transactions, currency, exchangeRates]
   );
 
   const merchantLabelLookup = useMemo(() => {
@@ -513,6 +525,303 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             />
             <span>Largest Expenses</span>
           </label>
+        </div>
+      </section>
+
+      {/* 24-Month Yearly Spending Trend Line Chart */}
+      <section
+        aria-label="24-month yearly spending trend"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-5"
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                24-Month Yearly Spending Trend
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {yearlySpendingTrend.horizonLabel} ·{' '}
+              <span className="font-mono-num">
+                {yearlySpendingTrend.observedMonthsCount} of 24
+              </span>{' '}
+              months recorded · Total monthly expenditure trajectory
+            </p>
+          </div>
+
+          <div
+            className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg self-start lg:self-auto"
+            role="group"
+            aria-label="24-month trend line series mode"
+          >
+            <button
+              type="button"
+              onClick={() => setTrendChartMode('total')}
+              aria-pressed={trendChartMode === 'total'}
+              className={`min-h-[30px] px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                trendChartMode === 'total'
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              Total + 3M Avg
+            </button>
+            <button
+              type="button"
+              onClick={() => setTrendChartMode('split')}
+              aria-pressed={trendChartMode === 'split'}
+              className={`min-h-[30px] px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                trendChartMode === 'split'
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              Essential vs. Discretionary
+            </button>
+          </div>
+        </div>
+
+        {/* 24-Month Health Summary Metrics */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              24M Recorded Expenditure
+            </p>
+            <p className="mt-1 text-lg font-semibold font-mono-num text-slate-900 dark:text-slate-100">
+              {formatMoney(yearlySpendingTrend.totalExpenditure, currency, 2)}
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono-num">
+              Across {yearlySpendingTrend.observedMonthsCount} month
+              {yearlySpendingTrend.observedMonthsCount === 1 ? '' : 's'}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Monthly Average
+            </p>
+            <p className="mt-1 text-lg font-semibold font-mono-num text-slate-900 dark:text-slate-100">
+              {formatMoney(yearlySpendingTrend.monthlyAverage, currency, 2)}
+              <span className="text-xs font-normal text-slate-500">/mo</span>
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+              Shown as dashed reference line
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Year-over-Year Pace
+            </p>
+            {yearlySpendingTrend.yoyDeltaPct !== null ? (
+              <>
+                <p
+                  className={`mt-1 text-lg font-semibold font-mono-num ${
+                    yearlySpendingTrend.yoyDeltaPct <= 0
+                      ? 'text-teal-700 dark:text-teal-400'
+                      : 'text-amber-700 dark:text-amber-400'
+                  }`}
+                >
+                  {yearlySpendingTrend.yoyDeltaPct > 0 ? '+' : ''}
+                  {yearlySpendingTrend.yoyDeltaPct.toFixed(1)}% YoY
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono-num">
+                  {formatMoney(yearlySpendingTrend.priorYearAvg ?? 0, currency)}/mo →{' '}
+                  {formatMoney(yearlySpendingTrend.recentYearAvg ?? 0, currency)}/mo
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-lg font-semibold font-mono-num text-slate-700 dark:text-slate-300">
+                  {yearlySpendingTrend.observedMonthsCount}m history
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Import 13+ months for YoY comparison
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Peak vs. Lowest Month
+            </p>
+            {yearlySpendingTrend.peakMonth && yearlySpendingTrend.lowestMonth ? (
+              <>
+                <p className="mt-1 text-sm font-semibold font-mono-num text-slate-900 dark:text-slate-100">
+                  High: {formatMoney(yearlySpendingTrend.peakMonth.amount, currency)} (
+                  {yearlySpendingTrend.peakMonth.label})
+                </p>
+                <p className="mt-0.5 text-[11px] font-mono-num text-teal-700 dark:text-teal-400">
+                  Low: {formatMoney(yearlySpendingTrend.lowestMonth.amount, currency)} (
+                  {yearlySpendingTrend.lowestMonth.label})
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-slate-400">—</p>
+            )}
+          </div>
+        </div>
+
+        {/* 24-Month Interactive Line Chart */}
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-end gap-4 text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-teal-700 dark:bg-teal-400 inline-block" />
+              Total Monthly Spend
+            </span>
+            {trendChartMode === 'total' ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-3 h-0.5 border-t-2 border-dashed border-slate-500 inline-block" />
+                3-Month Moving Avg
+              </span>
+            ) : (
+              <>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-3 h-0.5 bg-sky-600 inline-block" />
+                  Essential
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-3 h-0.5 bg-amber-500 inline-block" />
+                  Non-Essential
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="w-full h-[280px] sm:h-[310px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={yearlySpendingTrend.points}
+                margin={{ top: 10, right: 12, left: -4, bottom: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="#cbd5e1"
+                  opacity={0.35}
+                />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 11, fill: '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                  minTickGap={22}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => formatMoney(Number(v), currency)}
+                />
+                {yearlySpendingTrend.monthlyAverage > 0 && (
+                  <ReferenceLine
+                    y={yearlySpendingTrend.monthlyAverage}
+                    stroke="#94a3b8"
+                    strokeDasharray="4 4"
+                    strokeOpacity={0.75}
+                  />
+                )}
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload || payload.length === 0) return null;
+                    const pt = payload[0].payload as TwentyFourMonthTrendPoint;
+                    if (!pt.hasData || pt.totalSpending === null) {
+                      return (
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 shadow-md text-xs">
+                          <p className="font-semibold text-slate-900 dark:text-slate-100">
+                            {pt.label}
+                          </p>
+                          <p className="text-slate-500 dark:text-slate-400">
+                            No statement data imported for this month
+                          </p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 shadow-md text-xs space-y-1">
+                        <p className="font-semibold text-slate-900 dark:text-slate-100">
+                          {pt.label} ({pt.monthKey})
+                        </p>
+                        <div className="flex items-center justify-between gap-5 font-mono-num font-semibold">
+                          <span className="text-teal-700 dark:text-teal-400">Total Spend:</span>
+                          <span className="text-slate-900 dark:text-slate-100">
+                            {formatMoney(pt.totalSpending, currency, 2)}
+                          </span>
+                        </div>
+                        {pt.essential !== null && (
+                          <div className="flex items-center justify-between gap-5 font-mono-num">
+                            <span className="text-sky-700 dark:text-sky-400">Essential:</span>
+                            <span className="text-slate-700 dark:text-slate-300">
+                              {formatMoney(pt.essential, currency, 2)}
+                            </span>
+                          </div>
+                        )}
+                        {pt.nonEssential !== null && (
+                          <div className="flex items-center justify-between gap-5 font-mono-num">
+                            <span className="text-amber-700 dark:text-amber-400">Non-Essential:</span>
+                            <span className="text-slate-700 dark:text-slate-300">
+                              {formatMoney(pt.nonEssential, currency, 2)}
+                            </span>
+                          </div>
+                        )}
+                        {pt.rolling3mAvg !== null && (
+                          <div className="pt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-5 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
+                            <span>3M Moving Avg:</span>
+                            <span>{formatMoney(pt.rolling3mAvg, currency, 2)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="totalSpending"
+                  name="Total Monthly Expenditure"
+                  stroke="#0f766e"
+                  strokeWidth={2.5}
+                  dot={{ r: 3, fill: '#0f766e', strokeWidth: 0 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls={false}
+                />
+                {trendChartMode === 'total' ? (
+                  <Line
+                    type="monotone"
+                    dataKey="rolling3mAvg"
+                    name="3-Month Moving Avg"
+                    stroke="#64748b"
+                    strokeWidth={1.75}
+                    strokeDasharray="5 4"
+                    dot={false}
+                    connectNulls={false}
+                  />
+                ) : (
+                  <>
+                    <Line
+                      type="monotone"
+                      dataKey="essential"
+                      name="Essential"
+                      stroke="#0284c7"
+                      strokeWidth={1.8}
+                      dot={false}
+                      connectNulls={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="nonEssential"
+                      name="Non-Essential"
+                      stroke="#f59e0b"
+                      strokeWidth={1.8}
+                      dot={false}
+                      connectNulls={false}
+                    />
+                  </>
+                )}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </section>
 

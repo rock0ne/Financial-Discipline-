@@ -3497,3 +3497,396 @@ export function computeSubscriptionAnnualProjection(
     topCategories,
   };
 }
+
+export type RecurringActionType = 'keep' | 'downgrade' | 'cancel';
+
+export interface SubscriptionCalendarEvent {
+  id: string;
+  recId: string;
+  date: string; // YYYY-MM-DD
+  dayOfMonth: number; // 1..31
+  merchant: string;
+  categoryLabel: string;
+  cadence: RecurringItem['cadence'];
+  subscriptionClass: SubscriptionClass;
+  action: RecurringActionType;
+  scheduledAmount: number; // Full billing charge on this date
+  effectiveAmount: number; // Amount after recurringActions (keep=100%, downgrade=65%, cancel=0%)
+  savedAmount: number; // scheduledAmount - effectiveAmount
+  priceIncreasePct?: number;
+}
+
+export interface SubscriptionCalendarMonthData {
+  year: number;
+  monthIndex: number; // 0..11
+  monthKey: string; // YYYY-MM
+  monthLabel: string; // e.g. "December 2026"
+  daysInMonth: number;
+  firstWeekdayMon0: number; // 0 = Monday .. 6 = Sunday
+  events: SubscriptionCalendarEvent[];
+  eventsByDay: Record<number, SubscriptionCalendarEvent[]>;
+  totalScheduled: number;
+  activeScheduled: number;
+  savedInMonth: number;
+  keepCount: number;
+  downgradeCount: number;
+  cancelCount: number;
+}
+
+const FULL_MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+function parseIsoYmdParts(iso: string): { y: number; m: number; d: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  return { y, m, d };
+}
+
+/**
+ * Projects upcoming subscription charge dates into a calendar month `(year, monthIndex)`
+ * using each recurring item's billing cadence, last billing anchor date, and live `recurringActions` state.
+ */
+export function computeSubscriptionCalendarMonth(
+  items: RecurringItem[],
+  recurringActions: Record<string, RecurringActionType>,
+  year: number,
+  monthIndex: number // 0..11
+): SubscriptionCalendarMonthData {
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  // Convert JS Sun=0..Sat=6 to Mon=0..Sun=6
+  const jsFirstDay = new Date(year, monthIndex, 1).getDay();
+  const firstWeekdayMon0 = (jsFirstDay + 6) % 7;
+  const monthNum = monthIndex + 1;
+  const monthKey = `${year}-${String(monthNum).padStart(2, '0')}`;
+  const monthLabel = `${FULL_MONTH_NAMES[monthIndex] ?? 'Month'} ${year}`;
+
+  const events: SubscriptionCalendarEvent[] = [];
+  const eventsByDay: Record<number, SubscriptionCalendarEvent[]> = {};
+
+  for (const item of items) {
+    const action: RecurringActionType = recurringActions[item.id] ?? item.action;
+    const anchor = parseIsoYmdParts(item.lastDate) ?? { y: year, m: monthNum, d: 15 };
+    const billingDays: number[] = [];
+
+    if (item.cadence === 'Weekly') {
+      const anchorUtc = Date.UTC(anchor.y, anchor.m - 1, anchor.d);
+      const monthStartUtc = Date.UTC(year, monthIndex, 1);
+      const monthEndUtc = Date.UTC(year, monthIndex, daysInMonth);
+      const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+      const diffWeeks = Math.floor((monthStartUtc - anchorUtc) / msPerWeek);
+      let cursor = anchorUtc + diffWeeks * msPerWeek;
+      while (cursor < monthStartUtc) cursor += msPerWeek;
+      while (cursor <= monthEndUtc) {
+        billingDays.push(new Date(cursor).getUTCDate());
+        cursor += msPerWeek;
+      }
+    } else if (item.cadence === 'Quarterly') {
+      const monthDiff = (year - anchor.y) * 12 + (monthNum - anchor.m);
+      if (((monthDiff % 3) + 3) % 3 === 0) {
+        billingDays.push(Math.min(anchor.d, daysInMonth));
+      }
+    } else {
+      // Monthly (default)
+      billingDays.push(Math.min(anchor.d, daysInMonth));
+    }
+
+    const baseChargeAmount =
+      item.cadence === 'Quarterly'
+        ? roundPence(item.monthlyCost * 3)
+        : item.cadence === 'Weekly'
+          ? roundPence((item.monthlyCost * 12) / 52)
+          : roundPence(item.monthlyCost);
+
+    const effectiveAmount =
+      action === 'cancel'
+        ? 0
+        : action === 'downgrade'
+          ? roundPence(baseChargeAmount * 0.65)
+          : baseChargeAmount;
+    const savedAmount = roundPence(baseChargeAmount - effectiveAmount);
+
+    for (const day of billingDays) {
+      const dateStr = `${monthKey}-${String(day).padStart(2, '0')}`;
+      const evt: SubscriptionCalendarEvent = {
+        id: `${item.id}-${dateStr}`,
+        recId: item.id,
+        date: dateStr,
+        dayOfMonth: day,
+        merchant: item.merchant,
+        categoryLabel: item.categoryLabel,
+        cadence: item.cadence,
+        subscriptionClass: item.subscriptionClass,
+        action,
+        scheduledAmount: baseChargeAmount,
+        effectiveAmount,
+        savedAmount,
+        priceIncreasePct: item.priceIncreasePct,
+      };
+      events.push(evt);
+      if (!eventsByDay[day]) eventsByDay[day] = [];
+      eventsByDay[day].push(evt);
+    }
+  }
+
+  events.sort(
+    (a, b) => a.dayOfMonth - b.dayOfMonth || b.scheduledAmount - a.scheduledAmount
+  );
+  for (const dayKey of Object.keys(eventsByDay)) {
+    eventsByDay[Number(dayKey)].sort((a, b) => b.scheduledAmount - a.scheduledAmount);
+  }
+
+  const totalScheduled = roundPence(events.reduce((s, e) => s + e.scheduledAmount, 0));
+  const activeScheduled = roundPence(events.reduce((s, e) => s + e.effectiveAmount, 0));
+  const savedInMonth = roundPence(events.reduce((s, e) => s + e.savedAmount, 0));
+
+  return {
+    year,
+    monthIndex,
+    monthKey,
+    monthLabel,
+    daysInMonth,
+    firstWeekdayMon0,
+    events,
+    eventsByDay,
+    totalScheduled,
+    activeScheduled,
+    savedInMonth,
+    keepCount: events.filter((e) => e.action === 'keep').length,
+    downgradeCount: events.filter((e) => e.action === 'downgrade').length,
+    cancelCount: events.filter((e) => e.action === 'cancel').length,
+  };
+}
+
+export interface TwentyFourMonthTrendPoint {
+  monthKey: string; // YYYY-MM
+  label: string; // e.g., "Nov 26"
+  year: number;
+  hasData: boolean;
+  totalSpending: number | null;
+  essential: number | null;
+  nonEssential: number | null;
+  income: number | null;
+  rolling3mAvg: number | null;
+}
+
+export interface TwentyFourMonthSpendingTrend {
+  horizonLabel: string;
+  windowMonthsCount: number;
+  observedMonthsCount: number;
+  totalExpenditure: number;
+  monthlyAverage: number;
+  priorYearAvg: number | null;
+  recentYearAvg: number | null;
+  yoyDeltaPct: number | null;
+  peakMonth: { monthKey: string; label: string; amount: number } | null;
+  lowestMonth: { monthKey: string; label: string; amount: number } | null;
+  points: TwentyFourMonthTrendPoint[];
+}
+
+/**
+ * Builds a continuous 24-month monthly expenditure series anchored at the latest transaction month,
+ * including Essential vs. Non-Essential split, 3-month rolling average, and Year-over-Year summary.
+ */
+export function computeTwentyFourMonthSpendingTrend(
+  transactions: Transaction[],
+  displayCurrency: CurrencyCode = 'GBP',
+  exchangeRates?: Partial<ExchangeRateTable>,
+  windowMonths = 24
+): TwentyFourMonthSpendingTrend {
+  const validMonthKeys = Array.from(
+    new Set(
+      transactions
+        .map((tx) => tx.date.slice(0, 7))
+        .filter((mk) => /^\d{4}-\d{2}$/.test(mk))
+    )
+  ).sort();
+
+  if (validMonthKeys.length === 0) {
+    return {
+      horizonLabel: '24-Month Horizon',
+      windowMonthsCount: windowMonths,
+      observedMonthsCount: 0,
+      totalExpenditure: 0,
+      monthlyAverage: 0,
+      priorYearAvg: null,
+      recentYearAvg: null,
+      yoyDeltaPct: null,
+      peakMonth: null,
+      lowestMonth: null,
+      points: [],
+    };
+  }
+
+  const earliestMonthKey = validMonthKeys[0];
+  const latestMonthKey = validMonthKeys[validMonthKeys.length - 1];
+  const endYear = Number(latestMonthKey.slice(0, 4));
+  const endMonth = Number(latestMonthKey.slice(5, 7)); // 1..12
+
+  // Aggregate transactions by YYYY-MM in display currency
+  const byMonth = new Map<
+    string,
+    { essential: number; nonEssential: number; income: number; hasAnyTx: boolean }
+  >();
+
+  for (const tx of transactions) {
+    const mk = tx.date.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(mk)) continue;
+    const entry = byMonth.get(mk) ?? {
+      essential: 0,
+      nonEssential: 0,
+      income: 0,
+      hasAnyTx: false,
+    };
+    entry.hasAnyTx = true;
+    const converted = getTransactionDisplayAmount(tx, displayCurrency, exchangeRates);
+    if (tx.spendingClass === 'income' || tx.amount > 0) {
+      entry.income += Math.abs(converted);
+    } else if (tx.spendingClass === 'essential') {
+      entry.essential += Math.abs(converted);
+    } else if (tx.spendingClass === 'non-essential') {
+      entry.nonEssential += Math.abs(converted);
+    }
+    byMonth.set(mk, entry);
+  }
+
+  // Generate continuous 24-month sequence ending at latestMonthKey
+  const totalEndIndex = endYear * 12 + (endMonth - 1);
+  const points: TwentyFourMonthTrendPoint[] = [];
+  const observedValues: number[] = [];
+
+  for (let offset = windowMonths - 1; offset >= 0; offset--) {
+    const idx = totalEndIndex - offset;
+    const y = Math.floor(idx / 12);
+    const m = (idx % 12) + 1;
+    const monthKey = `${y}-${String(m).padStart(2, '0')}`;
+    const raw = byMonth.get(monthKey);
+    const isWithinRecordedSpan = monthKey >= earliestMonthKey;
+    const hasData = Boolean(raw?.hasAnyTx) || isWithinRecordedSpan;
+
+    if (!hasData) {
+      points.push({
+        monthKey,
+        label: formatMonthLabel(monthKey),
+        year: y,
+        hasData: false,
+        totalSpending: null,
+        essential: null,
+        nonEssential: null,
+        income: null,
+        rolling3mAvg: null,
+      });
+      continue;
+    }
+
+    const ess = roundPence(raw?.essential ?? 0);
+    const nonEss = roundPence(raw?.nonEssential ?? 0);
+    const total = roundPence(ess + nonEss);
+    const inc = roundPence(raw?.income ?? 0);
+
+    observedValues.push(total);
+    const recent3 = observedValues.slice(-3);
+    const rolling3mAvg = roundPence(
+      recent3.reduce((s, v) => s + v, 0) / recent3.length
+    );
+
+    points.push({
+      monthKey,
+      label: formatMonthLabel(monthKey),
+      year: y,
+      hasData: true,
+      totalSpending: total,
+      essential: ess,
+      nonEssential: nonEss,
+      income: inc,
+      rolling3mAvg,
+    });
+  }
+
+  const observedPoints = points.filter(
+    (p): p is TwentyFourMonthTrendPoint & { totalSpending: number } =>
+      p.hasData && p.totalSpending !== null
+  );
+
+  const totalExpenditure = roundPence(
+    observedPoints.reduce((s, p) => s + p.totalSpending, 0)
+  );
+  const monthlyAverage =
+    observedPoints.length > 0 ? roundPence(totalExpenditure / observedPoints.length) : 0;
+
+  // Prior 12 months (indices 0..11) vs. Recent 12 months (indices 12..23)
+  const halfPoint = Math.floor(windowMonths / 2);
+  const priorHalfObserved = points
+    .slice(0, halfPoint)
+    .filter((p): p is TwentyFourMonthTrendPoint & { totalSpending: number } => p.hasData && p.totalSpending !== null);
+  const recentHalfObserved = points
+    .slice(halfPoint)
+    .filter((p): p is TwentyFourMonthTrendPoint & { totalSpending: number } => p.hasData && p.totalSpending !== null);
+
+  const priorYearAvg =
+    priorHalfObserved.length > 0
+      ? roundPence(
+          priorHalfObserved.reduce((s, p) => s + p.totalSpending, 0) /
+            priorHalfObserved.length
+        )
+      : null;
+  const recentYearAvg =
+    recentHalfObserved.length > 0
+      ? roundPence(
+          recentHalfObserved.reduce((s, p) => s + p.totalSpending, 0) /
+            recentHalfObserved.length
+        )
+      : null;
+  const yoyDeltaPct =
+    priorYearAvg !== null && priorYearAvg > 0 && recentYearAvg !== null
+      ? roundPence(((recentYearAvg - priorYearAvg) / priorYearAvg) * 100)
+      : null;
+
+  let peakMonth: TwentyFourMonthSpendingTrend['peakMonth'] = null;
+  let lowestMonth: TwentyFourMonthSpendingTrend['lowestMonth'] = null;
+
+  for (const p of observedPoints) {
+    if (!peakMonth || p.totalSpending > peakMonth.amount) {
+      peakMonth = { monthKey: p.monthKey, label: p.label, amount: p.totalSpending };
+    }
+    if (!lowestMonth || p.totalSpending < lowestMonth.amount) {
+      lowestMonth = { monthKey: p.monthKey, label: p.label, amount: p.totalSpending };
+    }
+  }
+
+  const horizonLabel =
+    points.length >= 2
+      ? `${points[0].label} – ${points[points.length - 1].label}`
+      : formatMonthLabel(latestMonthKey);
+
+  return {
+    horizonLabel,
+    windowMonthsCount: windowMonths,
+    observedMonthsCount: observedPoints.length,
+    totalExpenditure,
+    monthlyAverage,
+    priorYearAvg,
+    recentYearAvg,
+    yoyDeltaPct,
+    peakMonth,
+    lowestMonth,
+    points,
+  };
+}
+
+
