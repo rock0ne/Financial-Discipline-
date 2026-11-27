@@ -70,7 +70,7 @@ import {
   type BatchTransactionUpdate,
 } from './utils/ledgerFilters';
 import { generateCurrentMonthSummaryPdfDocument } from './utils/pdfReportGenerator';
-import { savePdfDocument } from './utils/documentSave';
+import { saveEncryptedVaultDocument, savePdfDocument } from './utils/documentSave';
 import { OverviewView } from './components/OverviewView';
 import { SubscriptionsView } from './components/SubscriptionsView';
 import { CutSavingsView } from './components/CutSavingsView';
@@ -1192,20 +1192,15 @@ export default function App() {
 
   const handleExportEncryptedVault = useCallback(
     async (passphraseOverride?: string) => {
-      if (!payload) return;
+      if (!payload) throw new Error('Vault is not loaded');
       const pass = passphraseOverride ?? activePassphrase;
       if (!pass) throw new Error('Passphrase required for export');
 
       const envelope = await encryptVaultPayload(payload, pass);
-      const blob = new Blob([JSON.stringify(envelope, null, 2)], {
-        type: 'application/json',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `clearledger_backup_${new Date().toISOString().slice(0, 10)}.vault.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      return saveEncryptedVaultDocument(
+        envelope,
+        `clearledger_backup_${new Date().toISOString().slice(0, 10)}.vault.json`
+      );
     },
     [payload, activePassphrase]
   );

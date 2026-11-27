@@ -7,8 +7,9 @@ const distIndex = path.join(__dirname, '..', 'dist', 'index.html');
 const expectedRendererUrl = pathToFileURL(distIndex).href;
 const maxDocumentBytes = 32 * 1024 * 1024;
 const documentTypes = {
-  'application/pdf': { extension: '.pdf', label: 'PDF document' },
-  'text/csv': { extension: '.csv', label: 'CSV document' },
+  'application/pdf': { extension: '.pdf', filterExtension: 'pdf', label: 'PDF document' },
+  'text/csv': { extension: '.csv', filterExtension: 'csv', label: 'CSV document' },
+  'application/json': { extension: '.vault.json', filterExtension: 'json', label: 'Encrypted Clearledger vault' },
 };
 
 function decodeDocumentRequest(request) {
@@ -17,10 +18,13 @@ function decodeDocumentRequest(request) {
   }
   const { fileName, mimeType, dataBase64 } = request;
   const type = documentTypes[mimeType];
+  const allowedFileName = mimeType === 'application/json'
+    ? /^clearledger_backup_\d{4}-\d{2}-\d{2}\.vault\.json$/.test(fileName)
+    : /^clearledger_[A-Za-z0-9._-]+\.(pdf|csv)$/.test(fileName);
   if (!type || typeof fileName !== 'string' ||
-      !/^clearledger_[A-Za-z0-9._-]+\.(pdf|csv)$/.test(fileName) ||
+      !allowedFileName ||
       !fileName.toLowerCase().endsWith(type.extension) || fileName.length > 160) {
-    throw new Error('Only Clearledger PDF and CSV exports can be saved.');
+    throw new Error('Only Clearledger PDF, CSV and encrypted vault exports can be saved.');
   }
   if (typeof dataBase64 !== 'string' || dataBase64.length === 0 ||
       dataBase64.length > Math.ceil(maxDocumentBytes / 3) * 4 ||
@@ -36,6 +40,25 @@ function decodeDocumentRequest(request) {
   }
   if (mimeType === 'text/csv' && bytes.includes(0)) {
     throw new Error('CSV export data is invalid.');
+  }
+  if (mimeType === 'application/json') {
+    let envelope;
+    try {
+      envelope = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      throw new Error('Encrypted backup data is invalid.');
+    }
+    if (bytes.length > 15_000_000 || !envelope || typeof envelope !== 'object' ||
+        Array.isArray(envelope) || Object.keys(envelope).length !== 9 ||
+        envelope.format !== 'clearledger-e2ee-v1' || envelope.cipher !== 'AES-256-GCM' ||
+        envelope.kdf !== 'PBKDF2-SHA256' || !Number.isInteger(envelope.iterations) ||
+        envelope.iterations < 100_000 || !Number.isInteger(envelope.byteLength) ||
+        envelope.byteLength < 1 || typeof envelope.saltBase64 !== 'string' ||
+        typeof envelope.ivBase64 !== 'string' ||
+        typeof envelope.ciphertextBase64 !== 'string' ||
+        typeof envelope.updatedAt !== 'string') {
+      throw new Error('Only an encrypted Clearledger vault can be exported.');
+    }
   }
   return { fileName, type, bytes };
 }
@@ -65,11 +88,11 @@ ipcMain.handle('clearledger:save-document', async (event, request) => {
       title: `Save ${document.type.label}`,
       defaultPath: path.join(app.getPath('downloads'), document.fileName),
       buttonLabel: 'Save',
-      filters: [{ name: document.type.label, extensions: [document.type.extension.slice(1)] }],
+      filters: [{ name: document.type.label, extensions: [document.type.filterExtension] }],
       properties: ['dontAddToRecent'],
     });
     if (result.canceled || !result.filePath) return { status: 'cancelled' };
-    if (path.extname(result.filePath).toLowerCase() !== document.type.extension) {
+    if (!result.filePath.toLowerCase().endsWith(document.type.extension)) {
       return { status: 'error', message: `Choose a ${document.type.extension} file name.` };
     }
     await fs.writeFile(result.filePath, document.bytes);

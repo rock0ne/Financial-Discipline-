@@ -34,6 +34,7 @@ import {
   formatRemainingRetention,
   type ProviderAvailabilityMap,
 } from '../utils/aiSettings';
+import type { DocumentSaveResult } from '../utils/documentSave';
 
 interface VaultSecurityViewProps {
   isEncrypted: boolean;
@@ -55,7 +56,7 @@ interface VaultSecurityViewProps {
   onEnableEncryption: (passphrase: string) => Promise<void>;
   onLockVaultNow: () => void;
   onDisableEncryption: () => Promise<void>;
-  onExportEncryptedVault: (passphraseOverride?: string) => Promise<void>;
+  onExportEncryptedVault: (passphraseOverride?: string) => Promise<DocumentSaveResult>;
   onImportEncryptedVault: (file: File, passphrase: string) => Promise<string>;
   onDeleteImportBatch: (
     importId: string
@@ -215,12 +216,18 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
     }
     try {
       setBusy(true);
-      await onExportEncryptedVault(isEncrypted ? undefined : exportPass);
-      setExportPass('');
-      setStatusMsg('Encrypted .clearledger.vault file downloaded. Safe to move between Windows and mobile.');
+      const result = await onExportEncryptedVault(isEncrypted ? undefined : exportPass);
+      setStatusMsg(
+        result.status === 'saved'
+          ? `Encrypted backup saved as ${result.fileName} to your chosen location.`
+          : result.status === 'cancelled'
+            ? 'Encrypted backup save cancelled; no file was written.'
+            : `Encrypted backup download requested for ${result.fileName}; confirm it appears in your Downloads before relying on it.`
+      );
     } catch {
-      setErrorMsg('Could not export encrypted vault file.');
+      setErrorMsg('Could not save encrypted vault backup. Check the selected location for a partial file before retrying.');
     } finally {
+      setExportPass('');
       setBusy(false);
     }
   };
