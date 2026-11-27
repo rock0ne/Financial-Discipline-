@@ -1,11 +1,22 @@
 import React, { useMemo, useState } from 'react';
 import {
+  BarChart3,
   CheckCircle2,
   Download,
+  FileSpreadsheet,
   FileText,
   Printer,
   ShieldCheck,
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import {
   CATEGORIES,
   formatMoney,
@@ -17,7 +28,11 @@ import {
   type IsaPlannerSettings,
   type Transaction,
 } from '../types/finance';
-import { formatMonthLabel, type AnalyticsResult } from '../utils/analyticsEngine';
+import {
+  computeTopMerchantsByCategoryOverTime,
+  formatMonthLabel,
+  type AnalyticsResult,
+} from '../utils/analyticsEngine';
 import {
   buildMonthlyReportData,
   downloadMonthlyPdfReport,
@@ -27,6 +42,7 @@ import {
   type PdfPaperFormat,
   type ReportCadence,
 } from '../utils/pdfReportGenerator';
+import { downloadTransactionsCsv } from '../utils/statementParser';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -73,6 +89,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [includeSavingsVsDebt, setIncludeSavingsVsDebt] = useState(true);
   const [includeTopTransactions, setIncludeTopTransactions] = useState(true);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  const [merchantCategoryFilter, setMerchantCategoryFilter] = useState<CategoryId | 'all'>('all');
+  const [merchantChartMode, setMerchantChartMode] = useState<'stacked' | 'grouped'>('stacked');
 
   const applyExportPreset = (preset: 'full' | 'executive' | 'ledger') => {
     if (preset === 'full') {
@@ -166,9 +184,54 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     includeTopTransactions,
   });
 
+  const topMerchantsTrend = useMemo(
+    () =>
+      computeTopMerchantsByCategoryOverTime(
+        transactions,
+        merchantCategoryFilter,
+        currency,
+        exchangeRates,
+        5,
+        12
+      ),
+    [transactions, merchantCategoryFilter, currency, exchangeRates]
+  );
+
+  const merchantLabelLookup = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const m of topMerchantsTrend.merchants) {
+      map[m.key] =
+        merchantCategoryFilter === 'all' && m.key !== 'm_other'
+          ? `${m.merchant} (${m.categoryLabel})`
+          : m.merchant;
+    }
+    return map;
+  }, [topMerchantsTrend.merchants, merchantCategoryFilter]);
+
   const handleDownloadPdf = () => {
     const fileName = downloadMonthlyPdfReport(reportData, buildPdfOptions());
     setStatusNotice(`Exported ${fileName} locally (${paperFormat.toUpperCase()}) using jsPDF.`);
+    window.setTimeout(() => setStatusNotice(null), 5000);
+  };
+
+  const handleExportLedgerCsv = () => {
+    const rows =
+      reportData.ledgerTransactions.length > 0
+        ? reportData.ledgerTransactions
+        : transactions;
+    if (rows.length === 0) return;
+    const fileName = downloadTransactionsCsv(
+      rows,
+      currency,
+      `ledger_${reportData.periodKey}`,
+      {
+        exchangeRates,
+        smartTagsByTxId: reportData.smartTags.byTransactionId,
+      }
+    );
+    setStatusNotice(
+      `Exported ${rows.length} ledger transaction${rows.length === 1 ? '' : 's'} to ${fileName}.`
+    );
     window.setTimeout(() => setStatusNotice(null), 5000);
   };
 
@@ -217,6 +280,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={handleExportLedgerCsv}
+            className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+            Export Ledger CSV
+          </button>
           <button
             type="button"
             onClick={handlePrintPdf}
@@ -424,6 +495,191 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <span>Largest Expenses</span>
           </label>
         </div>
+      </section>
+
+      {/* Top Spending Merchants by Category Over Time (Interactive Bar Chart) */}
+      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                Top Spending Merchants by Category Over Time
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Monthly outflow trajectory for your highest-spend merchants
+              {merchantCategoryFilter === 'all'
+                ? ' across all spending categories'
+                : ` in ${CATEGORIES[merchantCategoryFilter]?.label ?? merchantCategoryFilter}`}
+              {topMerchantsTrend.monthCount > 0
+                ? ` · ${topMerchantsTrend.monthCount} month${topMerchantsTrend.monthCount === 1 ? '' : 's'} · Total ${formatMoney(topMerchantsTrend.totalSpend, currency, 2)}`
+                : ''}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <label
+              htmlFor="merchant-trend-category-select"
+              className="text-xs font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap"
+            >
+              Category
+            </label>
+            <select
+              id="merchant-trend-category-select"
+              value={merchantCategoryFilter}
+              onChange={(e) =>
+                setMerchantCategoryFilter(e.target.value as CategoryId | 'all')
+              }
+              className="min-h-[38px] px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-medium text-slate-900 dark:text-slate-100"
+            >
+              <option value="all">All Spending Categories</option>
+              {topMerchantsTrend.activeCategories.map((cat) => (
+                <option key={cat.categoryId} value={cat.categoryId}>
+                  {cat.label} ({formatMoney(cat.totalSpend, currency)})
+                </option>
+              ))}
+            </select>
+
+            <div
+              className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg"
+              role="group"
+              aria-label="Bar chart layout"
+            >
+              <button
+                type="button"
+                onClick={() => setMerchantChartMode('stacked')}
+                aria-pressed={merchantChartMode === 'stacked'}
+                className={`min-h-[30px] px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  merchantChartMode === 'stacked'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Stacked
+              </button>
+              <button
+                type="button"
+                onClick={() => setMerchantChartMode('grouped')}
+                aria-pressed={merchantChartMode === 'grouped'}
+                className={`min-h-[30px] px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  merchantChartMode === 'grouped'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Grouped
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {topMerchantsTrend.months.length === 0 ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400 py-8 text-center">
+            No outgoing merchant transactions found for this category.
+          </p>
+        ) : (
+          <>
+            <div className="w-full h-[280px] sm:h-[310px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={topMerchantsTrend.months}
+                  margin={{ top: 8, right: 8, left: -8, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke="#cbd5e1"
+                    opacity={0.35}
+                  />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => formatMoney(Number(v), currency)}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }}
+                    contentStyle={{
+                      backgroundColor: '#0f172a',
+                      border: '1px solid #334155',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      color: '#f8fafc',
+                    }}
+                    formatter={(value: unknown, name: unknown) => {
+                      const key = String(name);
+                      return [
+                        formatMoney(Number(value), currency, 2),
+                        merchantLabelLookup[key] ?? key,
+                      ];
+                    }}
+                  />
+                  {topMerchantsTrend.merchants.map((merchant, idx) => {
+                    const isLastStacked =
+                      merchantChartMode === 'stacked' &&
+                      idx === topMerchantsTrend.merchants.length - 1;
+                    return (
+                      <Bar
+                        key={merchant.key}
+                        dataKey={merchant.key}
+                        name={merchant.key}
+                        stackId={merchantChartMode === 'stacked' ? 'merchants' : undefined}
+                        fill={merchant.color}
+                        radius={
+                          merchantChartMode === 'grouped' || isLastStacked
+                            ? [4, 4, 0, 0]
+                            : [0, 0, 0, 0]
+                        }
+                        maxBarSize={merchantChartMode === 'stacked' ? 36 : 18}
+                      />
+                    );
+                  })}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Merchant Legend & Breakdown Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+              {topMerchantsTrend.merchants.map((m) => (
+                <div
+                  key={m.key}
+                  className="px-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span
+                      className="w-2.5 h-2.5 rounded-xs shrink-0"
+                      style={{ backgroundColor: m.color }}
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        {m.merchant}
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                        {m.categoryLabel} · {m.txCount} tx
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right font-mono-num shrink-0">
+                    <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                      {formatMoney(m.totalSpend, currency, 2)}
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {formatMoney(m.monthlyAvg, currency)}/mo · {m.sharePct.toFixed(0)}%
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       {/* Live Printable A4 Sheet Preview */}

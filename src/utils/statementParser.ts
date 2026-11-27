@@ -1,8 +1,11 @@
 import {
   CATEGORIES,
   CURRENCY_CONFIG,
+  getTransactionDisplayAmount,
   type CategoryId,
   type CurrencyCode,
+  type ExchangeRateTable,
+  type SmartTagMatch,
   type SpendingClass,
   type Transaction,
 } from '../types/finance';
@@ -413,15 +416,36 @@ function parseOfx(content: string, fileName: string): ParsedStatementResult {
 }
 
 function escapeCsvText(value: string): string {
-  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
+}
+
+export interface CsvExportOptions {
+  exchangeRates?: Partial<ExchangeRateTable>;
+  smartTagsByTxId?: Record<string, SmartTagMatch[]>;
 }
 
 export function exportTransactionsToCsv(
   transactions: Transaction[],
-  defaultCurrency: CurrencyCode = 'GBP'
+  defaultCurrency: CurrencyCode = 'GBP',
+  options: CsvExportOptions = {}
 ): string {
-  const header = 'Date,Merchant,Description,Amount,Currency,Category,Classification,Account,SourceFile';
+  const { exchangeRates, smartTagsByTxId } = options;
+  const header = [
+    'Date',
+    'Merchant',
+    'Description',
+    'Amount',
+    'Currency',
+    `DisplayAmount (${defaultCurrency})`,
+    'Category',
+    'Classification',
+    'SmartTags',
+    'Account',
+    'SourceFile',
+    'Notes',
+  ].join(',');
+
   const rows = transactions
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -431,9 +455,47 @@ export function exportTransactionsToCsv(
       const catLabel = escapeCsvText(CATEGORIES[tx.category]?.label ?? tx.category);
       const acc = escapeCsvText(tx.accountName);
       const source = escapeCsvText(tx.sourceFile ?? '');
+      const notes = escapeCsvText(tx.notes ?? '');
       const ccy = tx.currency ?? defaultCurrency;
-      return `${tx.date},${merchant},${desc},${tx.amount.toFixed(2)},${ccy},${catLabel},${tx.spendingClass},${acc},${source}`;
+      const displayAmt = getTransactionDisplayAmount(tx, defaultCurrency, exchangeRates);
+      const tagMatches = smartTagsByTxId?.[tx.id] ?? [];
+      const smartTags = escapeCsvText(tagMatches.map((t) => t.label).join('; '));
+      return [
+        tx.date,
+        merchant,
+        desc,
+        tx.amount.toFixed(2),
+        ccy,
+        displayAmt.toFixed(2),
+        catLabel,
+        tx.spendingClass,
+        smartTags,
+        acc,
+        source,
+        notes,
+      ].join(',');
     });
-  // Prefix UTF-8 BOM so Windows Excel renders £/€ and accents cleanly
-  return `\uFEFF${[header, ...rows].join('\n')}`;
+  // Prefix UTF-8 BOM + CRLF so Windows Excel and Google Sheets render currency symbols cleanly
+  return `\uFEFF${[header, ...rows].join('\r\n')}`;
+}
+
+export function downloadTransactionsCsv(
+  transactions: Transaction[],
+  defaultCurrency: CurrencyCode = 'GBP',
+  filePrefix = 'ledger',
+  options: CsvExportOptions = {}
+): string {
+  const csv = exportTransactionsToCsv(transactions, defaultCurrency, options);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const safePrefix = filePrefix.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `clearledger_${safePrefix}_${new Date().toISOString().slice(0, 10)}.csv`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return fileName;
 }

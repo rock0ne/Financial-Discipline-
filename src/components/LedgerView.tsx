@@ -29,7 +29,7 @@ import {
   type StatementImportMeta,
   type Transaction,
 } from '../types/finance';
-import { exportTransactionsToCsv } from '../utils/statementParser';
+import { downloadTransactionsCsv } from '../utils/statementParser';
 import {
   analyzeLedgerSmartTags,
   buildLearnedCategoryRules,
@@ -307,17 +307,12 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
 
   const handleDownloadCsv = (rowsToExport: Transaction[], suffix: string) => {
     if (rowsToExport.length === 0) return;
-    const csv = exportTransactionsToCsv(rowsToExport, currency);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const fileName = `clearledger_${suffix}_${new Date().toISOString().slice(0, 10)}.csv`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
+    const fileName = downloadTransactionsCsv(rowsToExport, currency, suffix, {
+      exchangeRates,
+      smartTagsByTxId: smartTagSummary.byTransactionId,
+    });
     setExportNotice(
-      `Exported ${rowsToExport.length} transaction${rowsToExport.length === 1 ? '' : 's'} locally to ${fileName}.`
+      `Exported ${rowsToExport.length} transaction${rowsToExport.length === 1 ? '' : 's'} with Smart Tags to ${fileName}.`
     );
     window.setTimeout(() => setExportNotice(null), 4000);
   };

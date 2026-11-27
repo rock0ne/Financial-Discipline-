@@ -3095,5 +3095,218 @@ export function computeCategoryVarianceProjections(
   };
 }
 
+export interface TopMerchantSeriesMeta {
+  key: string;
+  merchant: string;
+  categoryId: CategoryId;
+  categoryLabel: string;
+  totalSpend: number;
+  monthlyAvg: number;
+  txCount: number;
+  sharePct: number;
+  color: string;
+}
+
+export interface TopMerchantTimePoint {
+  monthKey: string;
+  label: string;
+  total: number;
+  [merchantKey: string]: string | number;
+}
+
+export interface TopMerchantsOverTimeResult {
+  months: TopMerchantTimePoint[];
+  merchants: TopMerchantSeriesMeta[];
+  activeCategories: Array<{
+    categoryId: CategoryId;
+    label: string;
+    totalSpend: number;
+  }>;
+  totalSpend: number;
+  monthCount: number;
+}
+
+const MERCHANT_CHART_PALETTE = [
+  '#0f766e', // teal-700
+  '#0284c7', // sky-600
+  '#d97706', // amber-600
+  '#4f46e5', // indigo-600
+  '#334155', // slate-700
+  '#059669', // emerald-600
+  '#e11d48', // rose-600
+  '#7c3aed', // violet-600
+];
+
+/**
+ * Computes a chronological monthly bar-chart series of the top spending merchants,
+ * optionally filtered to a single spending category, with pence-accurate totals.
+ */
+export function computeTopMerchantsByCategoryOverTime(
+  transactions: Transaction[],
+  categoryFilter: CategoryId | 'all' = 'all',
+  displayCurrency: CurrencyCode = 'GBP',
+  exchangeRates?: Partial<ExchangeRateTable>,
+  topN = 5,
+  maxMonths = 12
+): TopMerchantsOverTimeResult {
+  const spendingTxs = transactions.filter(
+    (tx) =>
+      tx.spendingClass !== 'income' &&
+      tx.spendingClass !== 'savings' &&
+      tx.amount < 0 &&
+      tx.date.length >= 7
+  );
+
+  // Build active categories across all spending transactions for the category dropdown
+  const catSpendMap = new Map<CategoryId, number>();
+  for (const tx of spendingTxs) {
+    const absAmt = Math.abs(
+      getTransactionDisplayAmount(tx, displayCurrency, exchangeRates)
+    );
+    catSpendMap.set(tx.category, (catSpendMap.get(tx.category) ?? 0) + absAmt);
+  }
+  const activeCategories = Array.from(catSpendMap.entries())
+    .map(([categoryId, totalSpend]) => ({
+      categoryId,
+      label: CATEGORIES[categoryId]?.label ?? categoryId,
+      totalSpend: roundPence(totalSpend),
+    }))
+    .sort((a, b) => b.totalSpend - a.totalSpend);
+
+  const scopedTxs =
+    categoryFilter === 'all'
+      ? spendingTxs
+      : spendingTxs.filter((tx) => tx.category === categoryFilter);
+
+  if (scopedTxs.length === 0) {
+    return {
+      months: [],
+      merchants: [],
+      activeCategories,
+      totalSpend: 0,
+      monthCount: 0,
+    };
+  }
+
+  const allMonthKeys = Array.from(
+    new Set(scopedTxs.map((tx) => tx.date.slice(0, 7)))
+  ).sort();
+  const windowMonths =
+    maxMonths > 0 ? allMonthKeys.slice(-maxMonths) : allMonthKeys;
+  const windowMonthSet = new Set(windowMonths);
+
+  const merchAgg = new Map<
+    string,
+    {
+      merchant: string;
+      categoryId: CategoryId;
+      totalSpend: number;
+      txCount: number;
+      byMonth: Map<string, number>;
+    }
+  >();
+
+  let totalSpend = 0;
+
+  for (const tx of scopedTxs) {
+    const mk = tx.date.slice(0, 7);
+    if (!windowMonthSet.has(mk)) continue;
+    const absAmt = Math.abs(
+      getTransactionDisplayAmount(tx, displayCurrency, exchangeRates)
+    );
+    totalSpend += absAmt;
+
+    const normKey = `${tx.merchant.trim().toLowerCase()}__${tx.category}`;
+    const prev = merchAgg.get(normKey) ?? {
+      merchant: tx.merchant.trim() || 'Unknown Merchant',
+      categoryId: tx.category,
+      totalSpend: 0,
+      txCount: 0,
+      byMonth: new Map<string, number>(),
+    };
+    prev.totalSpend += absAmt;
+    prev.txCount += 1;
+    prev.byMonth.set(mk, (prev.byMonth.get(mk) ?? 0) + absAmt);
+    merchAgg.set(normKey, prev);
+  }
+
+  const sortedMerchants = Array.from(merchAgg.values()).sort(
+    (a, b) => b.totalSpend - a.totalSpend
+  );
+  const topMerchants = sortedMerchants.slice(0, Math.max(1, topN));
+  const otherMerchants = sortedMerchants.slice(Math.max(1, topN));
+  const monthCount = Math.max(windowMonths.length, 1);
+  const roundedTotalSpend = roundPence(totalSpend);
+
+  const merchants: TopMerchantSeriesMeta[] = topMerchants.map((m, idx) => ({
+    key: `m_${idx}`,
+    merchant: m.merchant,
+    categoryId: m.categoryId,
+    categoryLabel: CATEGORIES[m.categoryId]?.label ?? m.categoryId,
+    totalSpend: roundPence(m.totalSpend),
+    monthlyAvg: roundPence(m.totalSpend / monthCount),
+    txCount: m.txCount,
+    sharePct: roundedTotalSpend > 0 ? (m.totalSpend / roundedTotalSpend) * 100 : 0,
+    color: MERCHANT_CHART_PALETTE[idx % MERCHANT_CHART_PALETTE.length],
+  }));
+
+  const otherTotal = roundPence(
+    otherMerchants.reduce((s, m) => s + m.totalSpend, 0)
+  );
+  const otherTxCount = otherMerchants.reduce((s, m) => s + m.txCount, 0);
+  const hasOther = otherTotal > 0;
+  if (hasOther) {
+    merchants.push({
+      key: 'm_other',
+      merchant: `Other (${otherMerchants.length} merchants)`,
+      categoryId: categoryFilter === 'all' ? 'other_discretionary' : categoryFilter,
+      categoryLabel:
+        categoryFilter === 'all'
+          ? 'Multiple categories'
+          : (CATEGORIES[categoryFilter]?.label ?? categoryFilter),
+      totalSpend: otherTotal,
+      monthlyAvg: roundPence(otherTotal / monthCount),
+      txCount: otherTxCount,
+      sharePct: roundedTotalSpend > 0 ? (otherTotal / roundedTotalSpend) * 100 : 0,
+      color: '#94a3b8',
+    });
+  }
+
+  const months: TopMerchantTimePoint[] = windowMonths.map((mk) => {
+    const point: TopMerchantTimePoint = {
+      monthKey: mk,
+      label: formatMonthLabel(mk),
+      total: 0,
+    };
+    let monthTotal = 0;
+
+    topMerchants.forEach((m, idx) => {
+      const val = roundPence(m.byMonth.get(mk) ?? 0);
+      point[`m_${idx}`] = val;
+      monthTotal += val;
+    });
+
+    if (hasOther) {
+      const otherMonthVal = roundPence(
+        otherMerchants.reduce((s, m) => s + (m.byMonth.get(mk) ?? 0), 0)
+      );
+      point.m_other = otherMonthVal;
+      monthTotal += otherMonthVal;
+    }
+
+    point.total = roundPence(monthTotal);
+    return point;
+  });
+
+  return {
+    months,
+    merchants,
+    activeCategories,
+    totalSpend: roundedTotalSpend,
+    monthCount: windowMonths.length,
+  };
+}
+
+
 
 

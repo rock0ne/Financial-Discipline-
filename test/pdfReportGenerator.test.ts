@@ -4,7 +4,12 @@ import {
   buildMonthlyReportData,
   generateMonthlyPdfDocument,
 } from '../src/utils/pdfReportGenerator';
-import { runLocalFinancialAnalytics } from '../src/utils/analyticsEngine';
+import {
+  analyzeLedgerSmartTags,
+  computeTopMerchantsByCategoryOverTime,
+  runLocalFinancialAnalytics,
+} from '../src/utils/analyticsEngine';
+import { exportTransactionsToCsv } from '../src/utils/statementParser';
 import type { CategoryId, IsaPlannerSettings, Transaction } from '../src/types/finance';
 
 const DEFAULT_ISA: IsaPlannerSettings = {
@@ -164,5 +169,50 @@ describe('pdfReportGenerator (jsPDF analytical findings & ledger summary)', () =
     });
     assert.ok(docLetter.output('datauristring').startsWith('data:application/pdf'));
     assert.ok(Math.abs(docLetter.internal.pageSize.getWidth() - 215.9) < 1);
+  });
+
+  it('exports spreadsheet-ready CSV with UTF-8 BOM, Smart Tags, converted amounts, and formula escaping', () => {
+    const txs: Transaction[] = [
+      makeTx('2026-10-05', '=CMD() Evil Corp', 'other_discretionary', -42.5),
+      makeTx('2026-10-12', 'HMRC Self Assessment', 'other_discretionary', -150),
+    ];
+    const smart = analyzeLedgerSmartTags(txs, 'GBP');
+    const csv = exportTransactionsToCsv(txs, 'GBP', {
+      smartTagsByTxId: smart.byTransactionId,
+    });
+
+    assert.ok(csv.startsWith('\uFEFFDate,Merchant,Description,Amount,Currency,DisplayAmount (GBP)'));
+    assert.ok(csv.includes('"\'=CMD() Evil Corp"'));
+    assert.ok(csv.includes('Tax Deductible'));
+    assert.ok(csv.includes('-42.50,GBP,-42.50'));
+  });
+
+  it('computes top spending merchants by category over time for bar chart visualization', () => {
+    const txs: Transaction[] = [
+      makeTx('2026-08-03', 'Waitrose', 'groceries', -120),
+      makeTx('2026-08-10', 'Tesco', 'groceries', -80),
+      makeTx('2026-08-14', 'Deliveroo', 'dining_takeaway', -55),
+      makeTx('2026-09-04', 'Waitrose', 'groceries', -150),
+      makeTx('2026-09-11', 'Tesco', 'groceries', -60),
+      makeTx('2026-09-18', 'Deliveroo', 'dining_takeaway', -90),
+    ];
+
+    const groceriesTrend = computeTopMerchantsByCategoryOverTime(
+      txs,
+      'groceries',
+      'GBP',
+      undefined,
+      5,
+      12
+    );
+
+    assert.equal(groceriesTrend.monthCount, 2);
+    assert.equal(groceriesTrend.totalSpend, 410);
+    assert.equal(groceriesTrend.merchants[0].merchant, 'Waitrose');
+    assert.equal(groceriesTrend.merchants[0].totalSpend, 270);
+    assert.equal(groceriesTrend.merchants[1].merchant, 'Tesco');
+    assert.equal(groceriesTrend.months[0].m_0, 120);
+    assert.equal(groceriesTrend.months[1].m_0, 150);
+    assert.equal(groceriesTrend.activeCategories.length, 2);
   });
 });
