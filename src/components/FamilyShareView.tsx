@@ -40,7 +40,7 @@ interface FamilyShareViewProps {
   goals: SavingsGoal[];
   isaSettings: IsaPlannerSettings;
   transactions: Transaction[];
-  onMergeSharedTransactions: (txs: Transaction[], senderName: string) => { added: number; skipped: number };
+  onMergeSharedTransactions: (txs: Transaction[], senderName: string) => Promise<{ added: number; skipped: number }>;
 }
 
 export const FamilyShareView: React.FC<FamilyShareViewProps> = ({
@@ -77,6 +77,7 @@ export const FamilyShareView: React.FC<FamilyShareViewProps> = ({
   const [decryptError, setDecryptError] = useState<string | null>(null);
   const [decryptedShare, setDecryptedShare] = useState<FamilySharePayload | null>(null);
   const [mergeFeedback, setMergeFeedback] = useState<string | null>(null);
+  const [mergeBusy, setMergeBusy] = useState(false);
   const receiveInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -645,18 +646,27 @@ export const FamilyShareView: React.FC<FamilyShareViewProps> = ({
                 <div className="pt-3 border-t border-teal-200/70 dark:border-teal-900/60 space-y-2">
                   <button
                     type="button"
+                    disabled={mergeBusy}
                     onClick={() => {
-                      const res = onMergeSharedTransactions(
+                      if (mergeBusy) return;
+                      setMergeBusy(true);
+                      setMergeFeedback(null);
+                      void onMergeSharedTransactions(
                         decryptedShare.transactions!,
                         decryptedShare.senderName
-                      );
-                      setMergeFeedback(
-                        `Merged ${res.added} household transactions into your local ledger (${res.skipped} duplicates skipped).`
-                      );
+                      ).then((res) => {
+                        setMergeFeedback(
+                          `Saved ${res.added} household transactions into your local ledger (${res.skipped} duplicates skipped).`
+                        );
+                      }).catch(() => {
+                        setMergeFeedback('Local vault save failed or is unconfirmed. Shared rows remain available; check vault status before retrying.');
+                      }).finally(() => {
+                        setMergeBusy(false);
+                      });
                     }}
-                    className="w-full min-h-[40px] px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-medium transition-colors cursor-pointer"
+                    className="w-full min-h-[40px] px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs font-medium transition-colors cursor-pointer"
                   >
-                    Merge {decryptedShare.transactions.length} Shared Transactions into My Household Ledger
+                    {mergeBusy ? 'Saving shared transactions…' : `Merge ${decryptedShare.transactions.length} Shared Transactions into My Household Ledger`}
                   </button>
                   {mergeFeedback && (
                     <p className="text-xs font-medium text-teal-800 dark:text-teal-300">

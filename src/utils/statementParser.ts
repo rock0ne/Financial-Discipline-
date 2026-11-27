@@ -227,9 +227,9 @@ function parseCsvLine(line: string, delimiter: string): string[] {
 }
 
 export function buildDedupKey(
-  tx: Pick<Transaction, 'date' | 'description' | 'amount' | 'currency'>
+  tx: Pick<Transaction, 'date' | 'description' | 'amount' | 'currency' | 'accountName'>
 ): string {
-  return `${tx.date}|${tx.description.toLowerCase().trim()}|${tx.amount.toFixed(2)}|${tx.currency ?? ''}`;
+  return `${tx.accountName.toLowerCase().trim()}|${tx.date}|${tx.description.toLowerCase().trim()}|${tx.amount.toFixed(2)}|${tx.currency ?? ''}`;
 }
 
 export interface ParsedStatementResult {

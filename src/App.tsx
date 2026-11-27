@@ -64,7 +64,7 @@ import {
   evaluateAdvancedRules,
   runLocalFinancialAnalytics,
 } from './utils/analyticsEngine';
-import { buildDedupKey } from './utils/statementParser';
+import { commitStatementImport, hasImportReceipt } from './utils/importCommit';
 import {
   applyBatchTransactionUpdate,
   type BatchTransactionUpdate,
@@ -476,12 +476,16 @@ export default function App() {
         recordHistory?: boolean;
         resetHistory?: boolean;
         coalesceKey?: string;
+        saveBeforeHistory?: boolean;
       }
     ) => {
       const updated: VaultPayload = {
         ...next,
         updatedAt: new Date().toISOString(),
       };
+      if (options?.saveBeforeHistory) {
+        await writeVaultSnapshot(updated, options?.passphraseOverride);
+      }
       if (options?.resetHistory) {
         resetPresent(updated);
       } else {
@@ -491,7 +495,9 @@ export default function App() {
           coalesceKey: options?.coalesceKey,
         });
       }
-      await writeVaultSnapshot(updated, options?.passphraseOverride);
+      if (!options?.saveBeforeHistory) {
+        await writeVaultSnapshot(updated, options?.passphraseOverride);
+      }
     },
     [commitHistory, resetPresent, writeVaultSnapshot]
   );
@@ -1013,74 +1019,41 @@ export default function App() {
       incoming: Transaction[],
       metas: StatementImportMeta[],
       replaceExisting: boolean
-    ): { added: number; skipped: number } => {
-      if (!payload) return { added: 0, skipped: 0 };
-
-      const baseTx = replaceExisting ? [] : payload.transactions;
-      const seen = new Set(baseTx.map(buildDedupKey));
-      const uniqueIncoming: Transaction[] = [];
-      let skipped = 0;
-
-      const addedByBatch = new Map<string, Transaction[]>();
-      const skippedByBatch = new Map<string, number>();
-
-      for (const tx of incoming) {
-        const key = buildDedupKey(tx);
-        const batchKey = tx.importBatchId ?? tx.sourceFile ?? '';
-        if (seen.has(key)) {
-          skipped++;
-          if (batchKey) {
-            skippedByBatch.set(batchKey, (skippedByBatch.get(batchKey) ?? 0) + 1);
-          }
-        } else {
-          seen.add(key);
-          uniqueIncoming.push(tx);
-          if (batchKey) {
-            const list = addedByBatch.get(batchKey) ?? [];
-            list.push(tx);
-            addedByBatch.set(batchKey, list);
-          }
-        }
-      }
-
-      const enrichedMetas: StatementImportMeta[] = metas.map((meta) => {
-        const addedList = addedByBatch.get(meta.id) ?? addedByBatch.get(meta.fileName);
-        const skippedCount =
-          skippedByBatch.get(meta.id) ?? skippedByBatch.get(meta.fileName) ?? 0;
-        if (!addedList && skippedCount === 0) return meta;
-        const dates = (addedList ?? []).map((t) => t.date).sort();
-        return {
-          ...meta,
-          rowCount: addedList ? addedList.length : meta.rowCount,
-          duplicatesSkipped: skippedCount,
-          dateRangeStart: dates[0] ?? meta.dateRangeStart,
-          dateRangeEnd: dates[dates.length - 1] ?? meta.dateRangeEnd,
-        };
-      });
-
-      const merged = [...uniqueIncoming, ...baseTx].sort((a, b) =>
-        b.date.localeCompare(a.date)
+    ): Promise<{ added: number; skipped: number }> => {
+      if (!payload) throw new Error('Local vault is unavailable');
+      return commitStatementImport(
+        payload,
+        incoming,
+        metas,
+        replaceExisting,
+        (next, label) =>
+          persistPayload(next, { label, saveBeforeHistory: true })
       );
-
-      void persistPayload(
-        {
-          ...payload,
-          isSampleData: false,
-          transactions: merged,
-          imports: replaceExisting
-            ? enrichedMetas
-            : [...enrichedMetas, ...payload.imports],
-        },
-        {
-          label: `Imported ${uniqueIncoming.length} transaction${
-            uniqueIncoming.length === 1 ? '' : 's'
-          }`,
-        }
-      );
-
-      return { added: uniqueIncoming.length, skipped };
     },
     [payload, persistPayload]
+  );
+
+  const handleVerifyImportStatus = useCallback(
+    async (metas: StatementImportMeta[]): Promise<'saved' | 'absent' | 'unknown'> => {
+      try {
+        const record = await readVaultRecord();
+        if (!record) return 'absent';
+        const stored = record.mode === 'encrypted_aes_gcm'
+          ? record.envelope && activePassphrase
+            ? await decryptVaultEnvelope(record.envelope, activePassphrase)
+            : null
+          : record.plaintext ?? null;
+        if (!stored) return 'unknown';
+        if (!hasImportReceipt(stored, metas)) return 'absent';
+        // A write can complete but its caller can still lose the acknowledgement.
+        // Reconcile the visible journal from the actual local vault in that case.
+        resetPresent(stored);
+        return 'saved';
+      } catch {
+        return 'unknown';
+      }
+    },
+    [activePassphrase, resetPresent]
   );
 
   const handleDeleteImportBatch = useCallback(
@@ -1125,7 +1098,7 @@ export default function App() {
   );
 
   const handleMergeSharedTransactions = useCallback(
-    (sharedTx: Transaction[], senderName: string): { added: number; skipped: number } => {
+    (sharedTx: Transaction[], senderName: string): Promise<{ added: number; skipped: number }> => {
       const batchId = `family-merge-${Date.now()}`;
       const fileName = `Family Share: ${senderName}`;
       const tagged = sharedTx.map((t) => ({
@@ -1859,6 +1832,7 @@ export default function App() {
         exchangeRates={payload.exchangeRates}
         onClose={() => setImportOpen(false)}
         onCommitImport={handleCommitImport}
+        onVerifyImportStatus={handleVerifyImportStatus}
       />
 
       {/* Offline Connectivity Indicator */}
