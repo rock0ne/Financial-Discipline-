@@ -1,0 +1,168 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  buildMonthlyReportData,
+  generateMonthlyPdfDocument,
+} from '../src/utils/pdfReportGenerator';
+import { runLocalFinancialAnalytics } from '../src/utils/analyticsEngine';
+import type { CategoryId, IsaPlannerSettings, Transaction } from '../src/types/finance';
+
+const DEFAULT_ISA: IsaPlannerSettings = {
+  cashIsaRate: 4.85,
+  currentAccountRate: 0.5,
+  stocksIsaRate: 7.0,
+  lisaRate: 4.5,
+  horizonYears: 5,
+  taxBand: 'basic_20',
+  cashIsaSplitPct: 50,
+  lisaSplitPct: 20,
+  stocksIsaSplitPct: 30,
+  customMonthlyOverride: null,
+};
+
+let txSeq = 0;
+
+function makeTx(
+  date: string,
+  merchant: string,
+  category: CategoryId,
+  amount: number
+): Transaction {
+  txSeq += 1;
+  const spendingClass: Transaction['spendingClass'] =
+    category === 'salary_income' || category === 'other_income'
+      ? 'income'
+      : category === 'savings_investment'
+        ? 'savings'
+        : category === 'housing' ||
+            category === 'utilities' ||
+            category === 'groceries' ||
+            category === 'transport' ||
+            category === 'insurance_health'
+          ? 'essential'
+          : 'non-essential';
+  return {
+    id: `pdf-tx-${txSeq}`,
+    date,
+    merchant,
+    description: merchant,
+    amount,
+    currency: 'GBP',
+    category,
+    spendingClass,
+    accountName: 'Current Account',
+  };
+}
+
+describe('pdfReportGenerator (jsPDF analytical findings & ledger summary)', () => {
+  it('builds analytical findings, smart-tag totals, and ledger summary data accurately', () => {
+    const txs: Transaction[] = [
+      makeTx('2026-09-01', 'Employer Payroll', 'salary_income', 3800),
+      makeTx('2026-09-05', 'Waitrose', 'groceries', -220),
+      makeTx('2026-09-12', 'HMRC Self Assessment', 'other_discretionary', -150),
+      makeTx('2026-09-18', 'Trainline Business Rail', 'transport', -60.4),
+      makeTx('2026-10-01', 'Employer Payroll', 'salary_income', 3800),
+      makeTx('2026-10-06', 'Waitrose', 'groceries', -230),
+      makeTx('2026-10-15', 'Adobe Creative Cloud', 'subscriptions', -54.99),
+      makeTx('2026-10-28', 'Trainline Business Rail', 'transport', -60.4),
+    ];
+
+    const caps: Partial<Record<CategoryId, number>> = {
+      transport: 60,
+      groceries: 250,
+    };
+
+    const analytics = runLocalFinancialAnalytics(
+      txs,
+      {},
+      {},
+      'all',
+      {},
+      caps,
+      'GBP',
+      undefined,
+      { referenceDate: new Date(2026, 10, 5) }
+    );
+
+    const report = buildMonthlyReportData(
+      txs,
+      analytics,
+      caps,
+      DEFAULT_ISA,
+      'summary',
+      'GBP'
+    );
+
+    assert.equal(report.ledgerSummary.totalRows, 8);
+    assert.equal(report.ledgerSummary.inflowCount, 2);
+    assert.equal(report.ledgerSummary.outflowCount, 6);
+    assert.equal(report.ledgerSummary.dateRangeStart, '2026-09-01');
+    assert.equal(report.ledgerSummary.dateRangeEnd, '2026-10-28');
+    assert.ok(report.ledgerSummary.topMerchants.length > 0);
+    assert.ok(report.smartTags.eitherTagCount >= 1);
+
+    const transportRow = report.categories.find((c) => c.categoryId === 'transport');
+    assert.ok(transportRow);
+    assert.equal(transportRow.amount, 60.4);
+    assert.equal(transportRow.variance, 0.4);
+  });
+
+  it('generates a clean, printable multi-section PDF binary via jsPDF in both A4 and Letter formats', () => {
+    const txs: Transaction[] = [];
+    for (let i = 1; i <= 25; i++) {
+      const day = String(Math.min(28, i)).padStart(2, '0');
+      txs.push(makeTx(`2026-10-${day}`, `Merchant ${i}`, 'dining_takeaway', -(15 + i * 1.25)));
+    }
+    txs.push(makeTx('2026-10-01', 'Employer Payroll', 'salary_income', 4200));
+
+    const caps: Partial<Record<CategoryId, number>> = { dining_takeaway: 500 };
+    const analytics = runLocalFinancialAnalytics(
+      txs,
+      {},
+      {},
+      'all',
+      {},
+      caps,
+      'GBP',
+      undefined,
+      { referenceDate: new Date(2026, 10, 5) }
+    );
+    const report = buildMonthlyReportData(
+      txs,
+      analytics,
+      caps,
+      DEFAULT_ISA,
+      '2026-10',
+      'GBP'
+    );
+
+    const docA4 = generateMonthlyPdfDocument(report, {
+      currency: 'GBP',
+      paperFormat: 'a4',
+      includeAnalyticalFindings: true,
+      includeLedgerSummary: true,
+      includeCategoryBreakdown: true,
+      includeRecommendations: true,
+      includeSubscriptions: true,
+      includeSavingsVsDebt: true,
+      includeTopTransactions: true,
+    });
+    const pdfOutputA4 = docA4.output('datauristring');
+    assert.ok(pdfOutputA4.startsWith('data:application/pdf'));
+    assert.ok(docA4.getNumberOfPages() >= 2);
+
+    const docLetter = generateMonthlyPdfDocument(report, {
+      currency: 'USD',
+      paperFormat: 'letter',
+      includeAnalyticalFindings: true,
+      includeLedgerSummary: true,
+      includeCategoryBreakdown: true,
+      includeRecommendations: false,
+      includeSubscriptions: false,
+      includeSavingsVsDebt: false,
+      includeTopTransactions: false,
+    });
+    assert.ok(docLetter.output('datauristring').startsWith('data:application/pdf'));
+    assert.ok(Math.abs(docLetter.internal.pageSize.getWidth() - 215.9) < 1);
+  });
+});

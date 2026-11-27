@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#0f766e" />
+  <rect x="44" y="44" width="424" height="424" rx="84" stroke="#2dd4bf" stroke-opacity="0.28" stroke-width="10" />
+  <!-- Shield + Ledger bars -->
+  <path
+    d="M256 108L374 152V244C374 322 323 386 256 410C189 386 138 322 138 244V152L256 108Z"
+    fill="#0f172a"
+    fill-opacity="0.22"
+    stroke="#ffffff"
+    stroke-width="22"
+    stroke-linejoin="round"
+  />
+  <rect x="196" y="206" width="120" height="22" rx="11" fill="#ffffff" />
+  <rect x="196" y="250" width="90" height="22" rx="11" fill="#5eead4" />
+  <rect x="196" y="294" width="64" height="22" rx="11" fill="#ffffff" fill-opacity="0.85" />
+</svg>

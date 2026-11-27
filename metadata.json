@@ -1,0 +1,6 @@
+{
+  "name": "Clearledger",
+  "description": "Local-first, end-to-end encrypted personal finance and bank statement analyzer for Windows and mobile. Discover spending drains, separate essential vs. non-essential spending, cut monthly waste, and project tax-free Cash ISA and long-term savings growth.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
