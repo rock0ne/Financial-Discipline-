@@ -64,6 +64,7 @@ import {
   runLocalFinancialAnalytics,
 } from './utils/analyticsEngine';
 import { buildDedupKey } from './utils/statementParser';
+import { downloadCurrentMonthSummaryPdf } from './utils/pdfReportGenerator';
 import { OverviewView } from './components/OverviewView';
 import { SubscriptionsView } from './components/SubscriptionsView';
 import { CutSavingsView } from './components/CutSavingsView';
@@ -1598,6 +1599,17 @@ export default function App() {
               onUpdateCategoryCap={handleUpdateCategoryCap}
               onNavigate={setActiveTab}
               onOpenImport={() => setImportOpen(true)}
+              onExportCurrentMonthPdf={() =>
+                downloadCurrentMonthSummaryPdf({
+                  transactions: payload.transactions,
+                  analytics,
+                  categoryCaps: payload.categoryCaps,
+                  isaSettings: payload.isaSettings,
+                  debts: payload.debts ?? [],
+                  currency: payload.currency,
+                  exchangeRates: payload.exchangeRates,
+                })
+              }
               isSampleData={payload.isSampleData}
             />
           )}

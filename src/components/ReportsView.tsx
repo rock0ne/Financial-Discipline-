@@ -92,8 +92,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [merchantCategoryFilter, setMerchantCategoryFilter] = useState<CategoryId | 'all'>('all');
   const [merchantChartMode, setMerchantChartMode] = useState<'stacked' | 'grouped'>('stacked');
 
-  const applyExportPreset = (preset: 'full' | 'executive' | 'ledger') => {
-    if (preset === 'full') {
+  const applyExportPreset = (
+    preset: 'current_month_projections' | 'full' | 'executive' | 'ledger'
+  ) => {
+    if (preset === 'current_month_projections') {
+      setReportCadence('monthly');
+      setSelectedPeriod(availableMonths[0] ?? 'summary');
+      setIncludeAnalyticalFindings(true);
+      setIncludeLedgerSummary(false);
+      setIncludeCategoryBreakdown(true);
+      setIncludeRecommendations(true);
+      setIncludeSubscriptions(true);
+      setIncludeSavingsVsDebt(debts.some((d) => d.balance > 0));
+      setIncludeTopTransactions(true);
+    } else if (preset === 'full') {
       setIncludeAnalyticalFindings(true);
       setIncludeLedgerSummary(true);
       setIncludeCategoryBreakdown(true);
@@ -403,8 +415,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <option value="letter">US Letter (8.5 × 11 in)</option>
             </select>
 
-            <div className="inline-flex items-center gap-1.5 pl-2 border-l border-slate-200 dark:border-slate-800">
+            <div className="inline-flex flex-wrap items-center gap-1.5 pl-2 border-l border-slate-200 dark:border-slate-800">
               <span className="text-xs text-slate-500 dark:text-slate-400">Presets:</span>
+              <button
+                type="button"
+                onClick={() => applyExportPreset('current_month_projections')}
+                className="min-h-[32px] px-2.5 py-1 rounded-md border border-teal-600/40 bg-teal-50/60 dark:bg-teal-950/40 text-xs font-medium text-teal-800 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/70 transition-colors cursor-pointer"
+              >
+                Current Month &amp; Projections
+              </button>
               <button
                 type="button"
                 onClick={() => applyExportPreset('full')}

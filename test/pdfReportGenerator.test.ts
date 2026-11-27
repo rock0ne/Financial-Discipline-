@@ -2,7 +2,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildMonthlyReportData,
+  generateCurrentMonthSummaryPdfDocument,
   generateMonthlyPdfDocument,
+  resolveCurrentMonthKey,
 } from '../src/utils/pdfReportGenerator';
 import {
   analyzeLedgerSmartTags,
@@ -214,5 +216,48 @@ describe('pdfReportGenerator (jsPDF analytical findings & ledger summary)', () =
     assert.equal(groceriesTrend.months[0].m_0, 120);
     assert.equal(groceriesTrend.months[1].m_0, 150);
     assert.equal(groceriesTrend.activeCategories.length, 2);
+  });
+
+  it('exports current month spending summary and projections as a printable jsPDF report', () => {
+    const txs: Transaction[] = [
+      makeTx('2026-08-01', 'Employer Payroll', 'salary_income', 4200),
+      makeTx('2026-08-05', 'Netflix', 'subscriptions', -17.99),
+      makeTx('2026-08-12', 'Waitrose', 'groceries', -210.5),
+      makeTx('2026-09-01', 'Employer Payroll', 'salary_income', 4200),
+      makeTx('2026-09-05', 'Netflix', 'subscriptions', -17.99),
+      makeTx('2026-09-12', 'Waitrose', 'groceries', -235.25),
+      makeTx('2026-10-01', 'Employer Payroll', 'salary_income', 4200),
+      makeTx('2026-10-05', 'Netflix', 'subscriptions', -17.99),
+      makeTx('2026-10-14', 'Waitrose', 'groceries', -260.4),
+    ];
+
+    assert.equal(resolveCurrentMonthKey(txs), '2026-10');
+
+    const caps: Partial<Record<CategoryId, number>> = { groceries: 250 };
+    const analytics = runLocalFinancialAnalytics(
+      txs,
+      {},
+      {},
+      'all',
+      {},
+      caps,
+      'GBP',
+      undefined,
+      { referenceDate: new Date(2026, 10, 5) }
+    );
+    const { doc, report, fileName } = generateCurrentMonthSummaryPdfDocument({
+      transactions: txs,
+      analytics,
+      categoryCaps: caps,
+      isaSettings: DEFAULT_ISA,
+      currency: 'GBP',
+      paperFormat: 'a4',
+    });
+
+    assert.equal(report.periodKey, '2026-10');
+    assert.equal(fileName, 'clearledger_summary_projections_2026-10.pdf');
+    assert.ok(report.subscriptionAnnualProjection.itemCount >= 1);
+    assert.ok(doc.output('datauristring').startsWith('data:application/pdf'));
+    assert.ok(doc.getNumberOfPages() >= 1);
   });
 });

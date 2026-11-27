@@ -12,6 +12,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  FileDown,
   SlidersHorizontal,
   TrendingDown,
   TrendingUp,
@@ -57,6 +58,7 @@ interface OverviewViewProps {
       | 'faq'
   ) => void;
   onOpenImport: () => void;
+  onExportCurrentMonthPdf?: () => string | null;
   isSampleData: boolean;
 }
 
@@ -71,11 +73,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   onUpdateCategoryCap,
   onNavigate,
   onOpenImport,
+  onExportCurrentMonthPdf,
   isSampleData,
 }) => {
   const [editingCaps, setEditingCaps] = useState(false);
   const [showTrendProjection, setShowTrendProjection] = useState(false);
   const [proRatePartialMonth, setProRatePartialMonth] = useState(false);
+  const [pdfNotice, setPdfNotice] = useState<string | null>(null);
 
   const categoryCapsMap = useMemo(() => {
     const map: Partial<Record<CategoryId, number>> = {};
@@ -202,33 +206,60 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </div>
         </div>
 
-        <div
-          className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800/80 rounded-lg self-start sm:self-auto"
-          role="group"
-          aria-label="Analysis timeframe"
-        >
-          {(
-            [
-              { id: 'all', label: 'All Months' },
-              { id: 12, label: '12 Months' },
-              { id: 6, label: '6 Months' },
-            ] as const
-          ).map((opt) => (
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {onExportCurrentMonthPdf && (
             <button
-              key={String(opt.id)}
               type="button"
-              onClick={() => onTimeframeChange(opt.id)}
-              className={`min-h-[36px] px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                timeframe === opt.id
-                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
+              onClick={() => {
+                const exportedName = onExportCurrentMonthPdf();
+                if (exportedName) {
+                  setPdfNotice(`Exported current month summary & projections to ${exportedName}.`);
+                  window.setTimeout(() => setPdfNotice(null), 5000);
+                }
+              }}
+              className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              {opt.label}
+              <FileDown className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+              Export Month PDF
             </button>
-          ))}
+          )}
+          <div
+            className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800/80 rounded-lg"
+            role="group"
+            aria-label="Analysis timeframe"
+          >
+            {(
+              [
+                { id: 'all', label: 'All Months' },
+                { id: 12, label: '12 Months' },
+                { id: 6, label: '6 Months' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={String(opt.id)}
+                type="button"
+                onClick={() => onTimeframeChange(opt.id)}
+                className={`min-h-[36px] px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  timeframe === opt.id
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {pdfNotice && (
+        <div
+          role="status"
+          className="p-3 rounded-xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 text-xs font-medium text-teal-900 dark:text-teal-200"
+        >
+          {pdfNotice}
+        </div>
+      )}
 
       {/* Primary KPI Grid — 4 structured metrics separated cleanly by hairlines */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl divide-y sm:divide-y-0 sm:divide-x divide-slate-200 dark:divide-slate-800">
