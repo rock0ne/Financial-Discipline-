@@ -3387,8 +3387,18 @@ export function computeSubscriptionAnnualProjection(
     for (const item of items) {
       let dueThisMonth = item.monthlyCost;
       if (item.cadence === 'Quarterly') {
-        // Quarterly charges land on months 3, 6, 9, 12 of the forward horizon
-        dueThisMonth = i % 3 === 0 ? item.monthlyCost * 3 : 0;
+        // Preserve each bill's own quarter, which may differ from the latest bill in the ledger.
+        const itemAnchor = parseIsoYmdParts(item.lastDate) ?? {
+          y: anchorYear,
+          m: anchorMonth,
+          d: 1,
+        };
+        const monthsSinceLastCharge =
+          (year - itemAnchor.y) * 12 + (month - itemAnchor.m);
+        dueThisMonth =
+          monthsSinceLastCharge > 0 && monthsSinceLastCharge % 3 === 0
+            ? item.monthlyCost * 3
+            : 0;
       }
 
       if (item.subscriptionClass === 'essential') {
@@ -3733,7 +3743,6 @@ export function computeTwentyFourMonthSpendingTrend(
     };
   }
 
-  const earliestMonthKey = validMonthKeys[0];
   const latestMonthKey = validMonthKeys[validMonthKeys.length - 1];
   const endYear = Number(latestMonthKey.slice(0, 4));
   const endMonth = Number(latestMonthKey.slice(5, 7)); // 1..12
@@ -3776,8 +3785,8 @@ export function computeTwentyFourMonthSpendingTrend(
     const m = (idx % 12) + 1;
     const monthKey = `${y}-${String(m).padStart(2, '0')}`;
     const raw = byMonth.get(monthKey);
-    const isWithinRecordedSpan = monthKey >= earliestMonthKey;
-    const hasData = Boolean(raw?.hasAnyTx) || isWithinRecordedSpan;
+    // A gap between imported months is unknown, not an observed zero-spend month.
+    const hasData = Boolean(raw?.hasAnyTx);
 
     if (!hasData) {
       points.push({

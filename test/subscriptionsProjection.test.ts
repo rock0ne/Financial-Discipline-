@@ -101,6 +101,30 @@ describe('computeSubscriptionAnnualProjection', () => {
     assert.deepEqual(proj.topCategories, []);
   });
 
+  it('keeps each quarterly bill on its own billing months when another bill anchors the horizon', () => {
+    const mixedAnchors: RecurringItem[] = [
+      SAMPLE_RECURRING[0], // Most recent bill: November 2026.
+      {
+        ...SAMPLE_RECURRING[2],
+        lastDate: '2026-10-01', // Quarterly bill: January, April, July, October.
+      },
+    ];
+    const projection = computeSubscriptionAnnualProjection(mixedAnchors);
+
+    assert.equal(projection.months[0].monthKey, '2026-12');
+    assert.equal(projection.months[0].essential, 112.45);
+    assert.equal(projection.months[1].monthKey, '2027-01');
+    assert.equal(projection.months[1].essential, 232.45);
+    assert.equal(projection.months[2].monthKey, '2027-02');
+    assert.equal(projection.months[2].essential, 112.45);
+    assert.equal(projection.months[4].monthKey, '2027-04');
+    assert.equal(projection.months[4].essential, 232.45);
+
+    const januaryCalendar = computeSubscriptionCalendarMonth(mixedAnchors, {}, 2027, 0);
+    assert.equal(januaryCalendar.eventsByDay[1]?.[0].merchant, 'Thames Water');
+    assert.equal(januaryCalendar.totalScheduled, projection.months[1].total);
+  });
+
   it('maps upcoming charge dates onto calendar days using cadence and recurringActions overrides', () => {
     // December 2026 (monthIndex 11): monthly bills land on day 15 and day 18;
     // quarterly bill last billed 2026-11-01 should NOT land in Dec 2026, but SHOULD land in Feb 2027 (monthIndex 1)

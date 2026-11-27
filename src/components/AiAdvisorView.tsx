@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   ChevronDown,
   ChevronUp,
@@ -107,11 +108,19 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
   );
 
   const isOff = aiSettings.provider === 'off';
+  const isNativePackage = Capacitor.isNativePlatform() || Boolean(
+    (window as Window & { clearledgerDesktop?: { isDesktopApp?: boolean } })
+      .clearledgerDesktop?.isDesktopApp
+  );
   const activeProviderState =
     aiSettings.provider !== 'off' ? providerStatus?.[aiSettings.provider] ?? null : null;
   const activeProviderLabel = AI_PROVIDER_LABELS[aiSettings.provider];
 
   const handleRequestAdvice = async (customPrompt?: string) => {
+    if (isNativePackage) {
+      setError('AI Advisor is unavailable in this private native build; no data was sent.');
+      return;
+    }
     if (aiSettings.provider === 'off') {
       setError('Turn on an AI provider first (Claude, ChatGPT, or Gemini).');
       return;
@@ -181,6 +190,12 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
         </button>
       </div>
 
+      {isNativePackage && (
+        <div role="status" className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200 text-sm">
+          AI Advisor is not connected in this private Windows/Android build. Local reports and planning still work; no finance data is sent to an AI provider.
+        </div>
+      )}
+
       {/* Synced Provider & Retention Bar (mirrors ReadAloud Settings controls) */}
       <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
@@ -193,6 +208,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
             </label>
             <select
               id="advisor-provider-select"
+              disabled={isNativePackage}
               value={aiSettings.provider}
               onChange={(e) => {
                 const next = e.target.value as AiProviderSetting;
@@ -346,7 +362,9 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
             AI Financial Assistant is turned Off
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 max-w-xl mx-auto leading-relaxed">
-            Clearledger runs 100% locally without sending anything off your device. Select Claude, ChatGPT, or Gemini in the Provider dropdown above—or in Vault &amp; Settings—whenever you want AI guidance on your anonymized summary.
+            {isNativePackage
+              ? 'This private native build keeps the AI Advisor disconnected. Your local finance tools remain available.'
+              : 'Clearledger runs 100% locally without sending anything off your device. Select Claude, ChatGPT, or Gemini in the Provider dropdown above—or in Vault & Settings—whenever you want AI guidance on your anonymized summary.'}
           </p>
         </section>
       ) : (
@@ -384,7 +402,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
             />
             <button
               type="submit"
-              disabled={loading || analytics.monthCount === 0}
+              disabled={loading || analytics.monthCount === 0 || isNativePackage}
               className="min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               {loading ? (
@@ -403,7 +421,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
               <button
                 key={q}
                 type="button"
-                disabled={loading || analytics.monthCount === 0}
+                disabled={loading || analytics.monthCount === 0 || isNativePackage}
                 onClick={() => void handleRequestAdvice(q)}
                 className="min-h-[36px] text-left px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 text-xs text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
               >

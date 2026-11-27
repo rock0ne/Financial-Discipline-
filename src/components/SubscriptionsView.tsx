@@ -823,7 +823,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                   </h2>
                 </div>
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  Projected charge dates driven by each bill&rsquo;s recurrence cadence and your Keep / Downgrade / Cancel actions.
+                  Projected charge dates and what-if savings based on each bill&rsquo;s recurrence cadence and your planned Keep / Downgrade / Cancel choices. These choices do not change a provider bill.
                 </p>
               </div>
 
@@ -871,13 +871,13 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                   </strong>
                 </span>
                 <span className="text-slate-500 dark:text-slate-400">
-                  Active After Actions:{' '}
+                  Projected If Choices Are Completed:{' '}
                   <strong className="font-mono-num text-teal-700 dark:text-teal-400">
                     {formatMoney(calendarData.activeScheduled, currency, 2)}
                   </strong>
                 </span>
                 <span className="text-slate-500 dark:text-slate-400">
-                  Saved This Month:{' '}
+                  Potential Monthly Savings:{' '}
                   <strong className="font-mono-num text-emerald-700 dark:text-emerald-400">
                     +{formatMoney(calendarData.savedInMonth, currency, 2)}
                   </strong>

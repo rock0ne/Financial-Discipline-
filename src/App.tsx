@@ -69,7 +69,8 @@ import {
   applyBatchTransactionUpdate,
   type BatchTransactionUpdate,
 } from './utils/ledgerFilters';
-import { downloadCurrentMonthSummaryPdf } from './utils/pdfReportGenerator';
+import { generateCurrentMonthSummaryPdfDocument } from './utils/pdfReportGenerator';
+import { savePdfDocument } from './utils/documentSave';
 import { OverviewView } from './components/OverviewView';
 import { SubscriptionsView } from './components/SubscriptionsView';
 import { CutSavingsView } from './components/CutSavingsView';
@@ -1636,8 +1637,8 @@ export default function App() {
               onUpdateCategoryCap={handleUpdateCategoryCap}
               onNavigate={setActiveTab}
               onOpenImport={() => setImportOpen(true)}
-              onExportCurrentMonthPdf={() =>
-                downloadCurrentMonthSummaryPdf({
+              onExportCurrentMonthPdf={() => {
+                const { doc, fileName } = generateCurrentMonthSummaryPdfDocument({
                   transactions: payload.transactions,
                   analytics,
                   categoryCaps: payload.categoryCaps,
@@ -1645,8 +1646,9 @@ export default function App() {
                   debts: payload.debts ?? [],
                   currency: payload.currency,
                   exchangeRates: payload.exchangeRates,
-                })
-              }
+                });
+                return savePdfDocument(doc, fileName);
+              }}
               isSampleData={payload.isSampleData}
             />
           )}

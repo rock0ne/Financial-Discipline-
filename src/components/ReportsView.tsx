@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   BarChart3,
   CheckCircle2,
@@ -41,14 +42,15 @@ import {
 } from '../utils/analyticsEngine';
 import {
   buildMonthlyReportData,
-  downloadMonthlyPdfReport,
   formatQuarterLabel,
+  generateMonthlyPdfDocument,
   getAvailableQuarters,
   printMonthlyPdfReport,
   type PdfPaperFormat,
   type ReportCadence,
 } from '../utils/pdfReportGenerator';
-import { downloadTransactionsCsv } from '../utils/statementParser';
+import { exportTransactionsToCsv } from '../utils/statementParser';
+import { saveCsvDocument, savePdfDocument } from '../utils/documentSave';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -232,34 +234,57 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     return map;
   }, [topMerchantsTrend.merchants, merchantCategoryFilter]);
 
-  const handleDownloadPdf = () => {
-    const fileName = downloadMonthlyPdfReport(reportData, buildPdfOptions());
-    setStatusNotice(`Exported ${fileName} locally (${paperFormat.toUpperCase()}) using jsPDF.`);
+  const handleDownloadPdf = async () => {
+    try {
+      const doc = generateMonthlyPdfDocument(reportData, buildPdfOptions());
+      const safePeriod = reportData.periodKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const result = await savePdfDocument(doc, `clearledger_analytics_ledger_${safePeriod}.pdf`);
+      setStatusNotice(
+        result.status === 'saved'
+          ? `Saved ${result.fileName} to your chosen location.`
+          : result.status === 'cancelled'
+            ? 'PDF save cancelled; no file was written.'
+            : `Download requested for ${result.fileName}; check your Downloads.`
+      );
+    } catch (error) {
+      setStatusNotice(`PDF save failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
     window.setTimeout(() => setStatusNotice(null), 5000);
   };
 
-  const handleExportLedgerCsv = () => {
+  const handleExportLedgerCsv = async () => {
     const rows =
       reportData.ledgerTransactions.length > 0
         ? reportData.ledgerTransactions
         : transactions;
     if (rows.length === 0) return;
-    const fileName = downloadTransactionsCsv(
-      rows,
-      currency,
-      `ledger_${reportData.periodKey}`,
-      {
+    try {
+      const csv = exportTransactionsToCsv(rows, currency, {
         exchangeRates,
         smartTagsByTxId: reportData.smartTags.byTransactionId,
-      }
-    );
-    setStatusNotice(
-      `Exported ${rows.length} ledger transaction${rows.length === 1 ? '' : 's'} to ${fileName}.`
-    );
+      });
+      const safePeriod = reportData.periodKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `clearledger_ledger_${safePeriod}_${new Date().toISOString().slice(0, 10)}.csv`;
+      const result = await saveCsvDocument(csv, fileName);
+      setStatusNotice(
+        result.status === 'saved'
+          ? `Saved ${rows.length} ledger transaction${rows.length === 1 ? '' : 's'} to ${result.fileName}.`
+          : result.status === 'cancelled'
+            ? 'CSV save cancelled; no file was written.'
+            : `Download requested for ${result.fileName}; check your Downloads.`
+      );
+    } catch (error) {
+      setStatusNotice(`CSV save failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
     window.setTimeout(() => setStatusNotice(null), 5000);
   };
 
   const handlePrintPdf = () => {
+    if (Capacitor.isNativePlatform()) {
+      setStatusNotice('Use Export Printable PDF, then open the saved file in a PDF viewer to print.');
+      window.setTimeout(() => setStatusNotice(null), 5000);
+      return;
+    }
     printMonthlyPdfReport(reportData, buildPdfOptions());
     setStatusNotice(`Prepared printable ${paperFormat.toUpperCase()} PDF document.`);
     window.setTimeout(() => setStatusNotice(null), 5000);
@@ -434,7 +459,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 onClick={() => applyExportPreset('current_month_projections')}
                 className="min-h-[32px] px-2.5 py-1 rounded-md border border-teal-600/40 bg-teal-50/60 dark:bg-teal-950/40 text-xs font-medium text-teal-800 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/70 transition-colors cursor-pointer"
               >
-                Current Month &amp; Projections
+                Latest Imported Month &amp; Projections
               </button>
               <button
                 type="button"

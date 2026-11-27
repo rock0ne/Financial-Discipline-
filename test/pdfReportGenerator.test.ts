@@ -287,4 +287,20 @@ describe('pdfReportGenerator (jsPDF analytical findings & ledger summary)', () =
     assert.equal(trend.monthlyAverage, 950);
     assert.equal(trend.points[23].rolling3mAvg, 900);
   });
+
+  it('does not invent zero spending in a month with no imported transactions', () => {
+    const trend = computeTwentyFourMonthSpendingTrend(
+      [makeTx('2026-01-10', 'January bill', 'housing', -100),
+       makeTx('2026-03-10', 'March bill', 'housing', -300)],
+      'GBP',
+      undefined,
+      24
+    );
+    const february = trend.points.find((point) => point.monthKey === '2026-02');
+    assert.equal(february?.hasData, false);
+    assert.equal(february?.totalSpending, null);
+    assert.equal(trend.observedMonthsCount, 2);
+    assert.equal(trend.monthlyAverage, 200);
+    assert.equal(trend.lowestMonth?.monthKey, '2026-01');
+  });
 });

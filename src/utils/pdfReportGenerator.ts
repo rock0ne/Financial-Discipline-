@@ -1722,7 +1722,7 @@ export interface CurrentMonthSummaryPdfParams {
 }
 
 /**
- * Generates a focused, printable jsPDF report containing the current month's spending summary,
+ * Generates a focused, printable jsPDF report for the latest imported month,
  * category cap variance, next-month spending trend projections, and 12-month recurring forecast.
  */
 export function generateCurrentMonthSummaryPdfDocument(

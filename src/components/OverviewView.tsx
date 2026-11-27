@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { DocumentSaveResult } from '../utils/documentSave';
 import {
   Bar,
   BarChart,
@@ -58,7 +59,7 @@ interface OverviewViewProps {
       | 'faq'
   ) => void;
   onOpenImport: () => void;
-  onExportCurrentMonthPdf?: () => string | null;
+  onExportCurrentMonthPdf?: () => Promise<DocumentSaveResult>;
   isSampleData: boolean;
 }
 
@@ -79,7 +80,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   const [editingCaps, setEditingCaps] = useState(false);
   const [showTrendProjection, setShowTrendProjection] = useState(false);
   const [proRatePartialMonth, setProRatePartialMonth] = useState(false);
-  const [pdfNotice, setPdfNotice] = useState<string | null>(null);
+  const [pdfNotice, setPdfNotice] = useState<{
+    message: string;
+    kind: 'success' | 'info' | 'error';
+  } | null>(null);
+  const [pdfSaving, setPdfSaving] = useState(false);
+  const pdfNoticeTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (pdfNoticeTimer.current !== null) window.clearTimeout(pdfNoticeTimer.current);
+  }, []);
 
   const categoryCapsMap = useMemo(() => {
     const map: Partial<Record<CategoryId, number>> = {};
@@ -210,17 +220,32 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           {onExportCurrentMonthPdf && (
             <button
               type="button"
-              onClick={() => {
-                const exportedName = onExportCurrentMonthPdf();
-                if (exportedName) {
-                  setPdfNotice(`Exported current month summary & projections to ${exportedName}.`);
-                  window.setTimeout(() => setPdfNotice(null), 5000);
+              disabled={pdfSaving}
+              onClick={async () => {
+                if (pdfSaving) return;
+                if (pdfNoticeTimer.current !== null) window.clearTimeout(pdfNoticeTimer.current);
+                setPdfNotice(null);
+                setPdfSaving(true);
+                try {
+                  const result = await onExportCurrentMonthPdf();
+                  if (result.status === 'saved') {
+                    setPdfNotice({ message: `Saved ${result.fileName} to your chosen location.`, kind: 'success' });
+                  } else if (result.status === 'cancelled') {
+                    setPdfNotice({ message: 'PDF export cancelled; no save was confirmed.', kind: 'info' });
+                  } else {
+                    setPdfNotice({ message: `Download requested for ${result.fileName}; check your browser's downloads.`, kind: 'info' });
+                  }
+                } catch {
+                  setPdfNotice({ message: 'PDF export failed; no save was confirmed. Check the selected location for a partial file before retrying.', kind: 'error' });
+                } finally {
+                  setPdfSaving(false);
+                  pdfNoticeTimer.current = window.setTimeout(() => setPdfNotice(null), 8000);
                 }
               }}
-              className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
             >
               <FileDown className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-              Export Month PDF
+              {pdfSaving ? 'Saving PDF…' : 'Export Month PDF'}
             </button>
           )}
           <div
@@ -255,9 +280,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
       {pdfNotice && (
         <div
           role="status"
-          className="p-3 rounded-xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 text-xs font-medium text-teal-900 dark:text-teal-200"
+          className={`p-3 rounded-xl border text-xs font-medium ${pdfNotice.kind === 'success'
+            ? 'bg-teal-50 dark:bg-teal-950/40 border-teal-200 dark:border-teal-800 text-teal-900 dark:text-teal-200'
+            : pdfNotice.kind === 'error'
+              ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-900 dark:text-red-200'
+              : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'}`}
         >
-          {pdfNotice}
+          {pdfNotice.message}
         </div>
       )}
 
