@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { Download, Monitor, Smartphone, X } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
@@ -6,9 +7,13 @@ export const PWAInstallButton: React.FC = () => {
   const { isInstallable, isInstalled, isIOS, platform, install } =
     usePWAInstall();
   const [showGuide, setShowGuide] = useState(false);
+  const isNativePackage =
+    Capacitor.isNativePlatform() ||
+    (typeof window !== 'undefined' &&
+      Boolean((window as Window & { clearledgerDesktop?: object }).clearledgerDesktop));
 
   // Already running as an installed desktop/mobile app
-  if (isInstalled) {
+  if (isInstalled || isNativePackage) {
     return null;
   }
 

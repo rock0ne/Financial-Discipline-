@@ -7,13 +7,14 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   const isElectronBuild = process.env.ELECTRON_BUILD === 'true';
+  const isCapacitorBuild = process.env.CAPACITOR_BUILD === 'true';
 
   return {
     base: isElectronBuild ? './' : '/',
     plugins: [
       react(),
       tailwindcss(),
-      ...(!isElectronBuild
+      ...(!(isElectronBuild || isCapacitorBuild)
         ? [
             VitePWA({
               registerType: 'autoUpdate',

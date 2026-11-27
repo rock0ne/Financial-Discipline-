@@ -1302,7 +1302,7 @@ export default function App() {
   const currentNav = NAV_ITEMS.find((n) => n.id === activeTab) ?? NAV_ITEMS[0];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
+    <div className="safe-top-shell min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
       {/* Windows / Desktop & Tablet Persistent Left Sidebar */}
       <aside className="hidden md:flex md:flex-col md:w-[232px] xl:w-[252px] md:fixed md:inset-y-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-30">
         <div className="h-16 px-6 flex items-center border-b border-slate-200 dark:border-slate-800">
@@ -1391,7 +1391,7 @@ export default function App() {
       {/* Main Content Shell */}
       <div className="flex-1 flex flex-col min-w-0 md:pl-[232px] xl:pl-[252px]">
         {/* Top Bar (Desktop Contextual Breadcrumb + Primary Action / Compact Mobile Header <= 52px) */}
-        <header className="sticky top-0 z-20 h-[52px] md:h-16 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
+        <header className="sticky safe-sticky-top z-20 h-[52px] md:h-16 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 min-w-0">
             <span className="md:hidden text-base font-bold tracking-tight font-display text-slate-900 dark:text-slate-100 whitespace-nowrap shrink-0">
               Clearledger
@@ -1410,7 +1410,7 @@ export default function App() {
           <div className="flex items-center gap-2 shrink-0">
             {/* Global Vault Undo / Redo Controls */}
             <div
-              className="inline-flex items-center rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 divide-x divide-slate-200 dark:divide-slate-700 overflow-hidden"
+              className="hidden sm:inline-flex items-center rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 divide-x divide-slate-200 dark:divide-slate-700 overflow-hidden"
               role="group"
               aria-label="Undo and redo vault changes"
             >

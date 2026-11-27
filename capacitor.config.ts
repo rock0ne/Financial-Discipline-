@@ -10,6 +10,13 @@ const config = {
   server: {
     androidScheme: 'https',
   },
+  plugins: {
+    SystemBars: {
+      insetsHandling: 'css',
+      initialViewportFitValueHint: 'cover',
+      style: 'DARK',
+    },
+  },
 };
 
 export default config;
