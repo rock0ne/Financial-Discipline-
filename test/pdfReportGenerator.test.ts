@@ -2,11 +2,14 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildMonthlyReportData,
+  generateCurrentMonthSummaryPdfDocument,
   generateMonthlyPdfDocument,
+  resolveCurrentMonthKey,
 } from '../src/utils/pdfReportGenerator';
 import {
   analyzeLedgerSmartTags,
   computeTopMerchantsByCategoryOverTime,
+  computeTwentyFourMonthSpendingTrend,
   runLocalFinancialAnalytics,
 } from '../src/utils/analyticsEngine';
 import { exportTransactionsToCsv } from '../src/utils/statementParser';
@@ -214,5 +217,74 @@ describe('pdfReportGenerator (jsPDF analytical findings & ledger summary)', () =
     assert.equal(groceriesTrend.months[0].m_0, 120);
     assert.equal(groceriesTrend.months[1].m_0, 150);
     assert.equal(groceriesTrend.activeCategories.length, 2);
+  });
+
+  it('exports current month spending summary and projections as a printable jsPDF report', () => {
+    const txs: Transaction[] = [
+      makeTx('2026-08-01', 'Employer Payroll', 'salary_income', 4200),
+      makeTx('2026-08-05', 'Netflix', 'subscriptions', -17.99),
+      makeTx('2026-08-12', 'Waitrose', 'groceries', -210.5),
+      makeTx('2026-09-01', 'Employer Payroll', 'salary_income', 4200),
+      makeTx('2026-09-05', 'Netflix', 'subscriptions', -17.99),
+      makeTx('2026-09-12', 'Waitrose', 'groceries', -235.25),
+      makeTx('2026-10-01', 'Employer Payroll', 'salary_income', 4200),
+      makeTx('2026-10-05', 'Netflix', 'subscriptions', -17.99),
+      makeTx('2026-10-14', 'Waitrose', 'groceries', -260.4),
+    ];
+
+    assert.equal(resolveCurrentMonthKey(txs), '2026-10');
+
+    const caps: Partial<Record<CategoryId, number>> = { groceries: 250 };
+    const analytics = runLocalFinancialAnalytics(
+      txs,
+      {},
+      {},
+      'all',
+      {},
+      caps,
+      'GBP',
+      undefined,
+      { referenceDate: new Date(2026, 10, 5) }
+    );
+    const { doc, report, fileName } = generateCurrentMonthSummaryPdfDocument({
+      transactions: txs,
+      analytics,
+      categoryCaps: caps,
+      isaSettings: DEFAULT_ISA,
+      currency: 'GBP',
+      paperFormat: 'a4',
+    });
+
+    assert.equal(report.periodKey, '2026-10');
+    assert.equal(fileName, 'clearledger_summary_projections_2026-10.pdf');
+    assert.ok(report.subscriptionAnnualProjection.itemCount >= 1);
+    assert.ok(doc.output('datauristring').startsWith('data:application/pdf'));
+    assert.ok(doc.getNumberOfPages() >= 1);
+  });
+
+  it('computes a continuous 24-month yearly spending trend with rolling average and YoY pace', () => {
+    const txs: Transaction[] = [];
+    // Populate 24 consecutive months: Year 1 (2024-12..2025-11) = £1,000/mo, Year 2 (2025-12..2026-11) = £900/mo (-10% YoY)
+    for (let i = 0; i < 24; i++) {
+      const totalIdx = 2024 * 12 + 11 + i; // starts at 2024-12
+      const y = Math.floor(totalIdx / 12);
+      const m = (totalIdx % 12) + 1;
+      const dateStr = `${y}-${String(m).padStart(2, '0')}-10`;
+      const isSecondYear = i >= 12;
+      txs.push(makeTx(dateStr, 'Landlord', 'housing', isSecondYear ? -600 : -650));
+      txs.push(makeTx(dateStr, 'Dining', 'dining_takeaway', isSecondYear ? -300 : -350));
+    }
+
+    const trend = computeTwentyFourMonthSpendingTrend(txs, 'GBP', undefined, 24);
+    assert.equal(trend.points.length, 24);
+    assert.equal(trend.observedMonthsCount, 24);
+    assert.equal(trend.points[0].monthKey, '2024-12');
+    assert.equal(trend.points[23].monthKey, '2026-11');
+    assert.equal(trend.priorYearAvg, 1000);
+    assert.equal(trend.recentYearAvg, 900);
+    assert.equal(trend.yoyDeltaPct, -10);
+    assert.equal(trend.totalExpenditure, 22800);
+    assert.equal(trend.monthlyAverage, 950);
+    assert.equal(trend.points[23].rolling3mAvg, 900);
   });
 });

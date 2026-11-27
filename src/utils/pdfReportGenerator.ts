@@ -3,6 +3,7 @@ import {
   CATEGORIES,
   CURRENCY_CONFIG,
   getTransactionDisplayAmount,
+  type CapPaceAlert,
   type CategoryId,
   type CurrencyCode,
   type DebtAccount,
@@ -19,11 +20,14 @@ import {
 } from '../types/finance';
 import {
   analyzeLedgerSmartTags,
+  computeProjectedCapAlerts,
+  computeSubscriptionAnnualProjection,
   computeWealthProjections,
   formatMonthLabel,
   simulateDebtStrategies,
   type AnalyticsResult,
   type DebtSimulationResult,
+  type SubscriptionAnnualProjection,
 } from './analyticsEngine';
 
 export type ReportCadence = 'monthly' | 'quarterly';
@@ -124,6 +128,8 @@ export interface MonthlyReportData {
   ledgerSummary: ReportLedgerSummary;
   smartTags: SmartTagSummary;
   spendingTrendProjection: SpendingTrendProjectionSummary;
+  subscriptionAnnualProjection: SubscriptionAnnualProjection;
+  capPaceAlerts: CapPaceAlert[];
   upcomingBills: UpcomingBillsSummary;
   potentialMonthlySavings: number;
   potentialAnnualSavings: number;
@@ -432,6 +438,17 @@ export function buildMonthlyReportData(
       ? simulateDebtStrategies(activeDebts, extraMonthlyBudget, isaSettings.cashIsaRate)
       : null;
 
+  const subscriptionAnnualProjection = computeSubscriptionAnnualProjection(
+    analytics.recurringItems
+  );
+  const capPaceAlerts = computeProjectedCapAlerts(
+    transactions,
+    caps,
+    new Date(),
+    currency,
+    exchangeRates
+  );
+
   return {
     periodKey,
     periodLabel: isQuarterly
@@ -468,6 +485,8 @@ export function buildMonthlyReportData(
     ledgerSummary,
     smartTags,
     spendingTrendProjection: analytics.spendingTrendProjection,
+    subscriptionAnnualProjection,
+    capPaceAlerts,
     upcomingBills: analytics.upcomingBills,
     potentialMonthlySavings,
     potentialAnnualSavings,
@@ -1314,71 +1333,111 @@ export function generateMonthlyPdfDocument(
     y += 2;
   }
 
-  // 5. Cancelable / Downgradable Subscriptions
-  if (options.includeSubscriptions && report.cancelableSubscriptions.length > 0) {
+  // 5. 12-Month Recurring Expenditure Projection & Cancelable Subscriptions
+  if (
+    options.includeSubscriptions &&
+    (report.cancelableSubscriptions.length > 0 ||
+      report.subscriptionAnnualProjection.itemCount > 0)
+  ) {
+    const subProj = report.subscriptionAnnualProjection;
     drawSectionHeading(
-      'Recurring Subscriptions Marked for Action',
-      `${report.cancelableSubscriptions.length} item${report.cancelableSubscriptions.length === 1 ? '' : 's'}`
+      '12-Month Recurring Subscriptions & Projection',
+      `${subProj.horizonLabel} | ${subProj.itemCount} detected habit${subProj.itemCount === 1 ? '' : 's'}`
     );
 
-    const drawSubHeader = () => {
+    if (subProj.itemCount > 0) {
+      ensureSpace(18);
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.25);
+      doc.roundedRect(marginX, y, contentWidth, 13.5, 1.5, 1.5, 'FD');
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.8);
-      doc.setTextColor(100, 116, 139);
-      doc.text('Merchant', marginX, y);
-      doc.text('Category', marginX + 62, y);
-      doc.text('Action', marginX + 110, y);
-      doc.text('Current / mo', marginX + 145, y, { align: 'right' });
-      doc.text('Annual Saving', pageWidth - marginX, y, { align: 'right' });
-      y += 2.4;
-      drawHairline(y);
-      y += 4.3;
-    };
-
-    ensureSpace(14);
-    drawSubHeader();
-
-    report.cancelableSubscriptions.forEach((sub, idx) => {
-      ensureSpace(6.2, drawSubHeader);
-      if (idx % 2 === 1) {
-        doc.setFillColor(248, 250, 252);
-        doc.rect(marginX, y - 3.5, contentWidth, 5.2, 'F');
-      }
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.3);
+      doc.setFontSize(8.2);
       doc.setTextColor(15, 23, 42);
-      doc.text(sanitizePdfText(sub.merchant.slice(0, 30)), marginX, y);
-
-      doc.setTextColor(100, 116, 139);
-      doc.text(sanitizePdfText(sub.categoryLabel.slice(0, 24)), marginX + 62, y);
-
-      doc.setTextColor(180, 83, 9);
       doc.text(
-        sub.action === 'cancel'
-          ? 'Cancel'
-          : sub.action === 'downgrade'
-            ? 'Negotiate (-35%)'
-            : 'Review',
-        marginX + 110,
-        y
+        sanitizePdfText(
+          `Projected 12M Total: ${formatPdfMoney(subProj.totalAnnualBaseline, currency, 2)}  |  Essential: ${formatPdfMoney(subProj.essentialAnnual, currency, 2)}  |  Cancelable: ${formatPdfMoney(subProj.cancelableAnnual, currency, 2)}`
+        ),
+        marginX + 3.2,
+        y + 5.5
       );
-
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.6);
       doc.setTextColor(71, 85, 105);
-      doc.text(formatPdfMoney(sub.monthlyCost, currency, 2), marginX + 145, y, {
-        align: 'right',
-      });
-
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(15, 118, 110);
+      const driftSummary =
+        subProj.priceHikeDriftAnnual > 0
+          ? `  |  Price-hike drift risk: +${formatPdfMoney(subProj.priceHikeDriftAnnual, currency, 2)}/yr (${subProj.hikedCount} hiked)`
+          : '';
       doc.text(
-        formatPdfPreciseMoney(sub.potentialMonthlySaving * 12, currency),
-        pageWidth - marginX,
-        y,
-        { align: 'right' }
+        sanitizePdfText(
+          `Lean 12M commitment if cancelable habits cut: ${formatPdfMoney(subProj.optimizedAnnual, currency, 2)} (${formatPdfMoney(subProj.optimizedAnnual / 12, currency, 2)}/mo)${driftSummary}`
+        ),
+        marginX + 3.2,
+        y + 10.6
       );
-      y += 5.6;
-    });
-    y += 4;
+      y += 17.5;
+    }
+
+    if (report.cancelableSubscriptions.length > 0) {
+      const drawSubHeader = () => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.8);
+        doc.setTextColor(100, 116, 139);
+        doc.text('Merchant', marginX, y);
+        doc.text('Category', marginX + 62, y);
+        doc.text('Action', marginX + 110, y);
+        doc.text('Current / mo', marginX + 145, y, { align: 'right' });
+        doc.text('Annual Saving', pageWidth - marginX, y, { align: 'right' });
+        y += 2.4;
+        drawHairline(y);
+        y += 4.3;
+      };
+
+      ensureSpace(14);
+      drawSubHeader();
+
+      report.cancelableSubscriptions.forEach((sub, idx) => {
+        ensureSpace(6.2, drawSubHeader);
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(marginX, y - 3.5, contentWidth, 5.2, 'F');
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.3);
+        doc.setTextColor(15, 23, 42);
+        doc.text(sanitizePdfText(sub.merchant.slice(0, 30)), marginX, y);
+
+        doc.setTextColor(100, 116, 139);
+        doc.text(sanitizePdfText(sub.categoryLabel.slice(0, 24)), marginX + 62, y);
+
+        doc.setTextColor(180, 83, 9);
+        doc.text(
+          sub.action === 'cancel'
+            ? 'Cancel'
+            : sub.action === 'downgrade'
+              ? 'Negotiate (-35%)'
+              : 'Review',
+          marginX + 110,
+          y
+        );
+
+        doc.setTextColor(71, 85, 105);
+        doc.text(formatPdfMoney(sub.monthlyCost, currency, 2), marginX + 145, y, {
+          align: 'right',
+        });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 118, 110);
+        doc.text(
+          formatPdfPreciseMoney(sub.potentialMonthlySaving * 12, currency),
+          pageWidth - marginX,
+          y,
+          { align: 'right' }
+        );
+        y += 5.6;
+      });
+      y += 4;
+    }
   }
 
   // 6. Savings vs. Debt Payoff Comparison Table
@@ -1638,3 +1697,72 @@ export function printMonthlyPdfReport(
     }, 60_000);
   };
 }
+
+/**
+ * Returns the most recent YYYY-MM present in the ledger (or 'summary' if empty).
+ */
+export function resolveCurrentMonthKey(transactions: Transaction[]): string {
+  const latest = transactions
+    .map((tx) => tx.date.slice(0, 7))
+    .filter((mk) => /^\d{4}-\d{2}$/.test(mk))
+    .sort()
+    .pop();
+  return latest ?? 'summary';
+}
+
+export interface CurrentMonthSummaryPdfParams {
+  transactions: Transaction[];
+  analytics: AnalyticsResult;
+  categoryCaps?: Partial<Record<CategoryId, number>>;
+  isaSettings: IsaPlannerSettings;
+  debts?: DebtAccount[];
+  currency: CurrencyCode;
+  exchangeRates?: Partial<ExchangeRateTable>;
+  paperFormat?: PdfPaperFormat;
+}
+
+/**
+ * Generates a focused, printable jsPDF report containing the current month's spending summary,
+ * category cap variance, next-month spending trend projections, and 12-month recurring forecast.
+ */
+export function generateCurrentMonthSummaryPdfDocument(
+  params: CurrentMonthSummaryPdfParams
+): { doc: jsPDF; report: MonthlyReportData; fileName: string } {
+  const periodKey = resolveCurrentMonthKey(params.transactions);
+  const report = buildMonthlyReportData(
+    params.transactions,
+    params.analytics,
+    params.categoryCaps,
+    params.isaSettings,
+    periodKey,
+    params.currency,
+    params.exchangeRates,
+    params.debts ?? []
+  );
+
+  const doc = generateMonthlyPdfDocument(report, {
+    currency: params.currency,
+    exchangeRates: params.exchangeRates,
+    paperFormat: params.paperFormat ?? 'a4',
+    includeAnalyticalFindings: true,
+    includeLedgerSummary: false,
+    includeCategoryBreakdown: true,
+    includeRecommendations: true,
+    includeSubscriptions: true,
+    includeSavingsVsDebt: (params.debts ?? []).some((d) => d.balance > 0),
+    includeTopTransactions: true,
+  });
+
+  const safePeriod = report.periodKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `clearledger_summary_projections_${safePeriod}.pdf`;
+  return { doc, report, fileName };
+}
+
+export function downloadCurrentMonthSummaryPdf(
+  params: CurrentMonthSummaryPdfParams
+): string {
+  const { doc, fileName } = generateCurrentMonthSummaryPdfDocument(params);
+  doc.save(fileName);
+  return fileName;
+}
+

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Check,
+  CheckSquare,
   ChevronDown,
   ChevronUp,
   Download,
@@ -47,6 +48,7 @@ import {
   mergeTransactionTags,
   parseLedgerSearchQuery,
   removeTransactionTag,
+  type BatchTransactionUpdate,
 } from '../utils/ledgerFilters';
 
 interface LedgerViewProps {
@@ -60,6 +62,7 @@ interface LedgerViewProps {
     id: string,
     updates: Partial<Pick<Transaction, 'category' | 'spendingClass' | 'currency' | 'tags'>>
   ) => void;
+  onBatchUpdateTransactions?: (ids: string[], update: BatchTransactionUpdate) => number;
   onApplySuggestions: (suggestions: CategoryRuleSuggestion[]) => void;
   onDeleteRule: (ruleId: string) => void;
   onAddAdvancedRule: (
@@ -81,6 +84,7 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
   categoryRules,
   advancedRules,
   onUpdateTransaction,
+  onBatchUpdateTransactions,
   onApplySuggestions,
   onDeleteRule,
   onAddAdvancedRule,
@@ -96,6 +100,11 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
   const [customTagFilter, setCustomTagFilter] = useState<string>('all');
   const [editingTagTxId, setEditingTagTxId] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState('');
+  const [selectedTxIds, setSelectedTxIds] = useState<Set<string>>(() => new Set());
+  const [batchCategory, setBatchCategory] = useState<CategoryId | ''>('');
+  const [batchTagMode, setBatchTagMode] = useState<'none' | 'add_select' | 'add_custom' | 'remove'>('none');
+  const [batchTagSelection, setBatchTagSelection] = useState<string>('');
+  const [batchCustomTag, setBatchCustomTag] = useState<string>('');
   const [currencyFilter, setCurrencyFilter] = useState<'all' | CurrencyCode>('all');
   const [monthFilter, setMonthFilter] = useState<string>('all');
   const [minAmount, setMinAmount] = useState<string>('');
@@ -416,6 +425,114 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
       `Exported ${rowsToExport.length} transaction${rowsToExport.length === 1 ? '' : 's'} with Smart & Custom Tags to ${fileName}.`
     );
     window.setTimeout(() => setExportNotice(null), 4000);
+  };
+
+  const visibleTransactions = useMemo(
+    () => filtered.slice(0, visibleLimit),
+    [filtered, visibleLimit]
+  );
+
+  const validSelectedIds = useMemo(() => {
+    if (selectedTxIds.size === 0) return new Set<string>();
+    const existing = new Set(transactions.map((t) => t.id));
+    const pruned = new Set<string>();
+    selectedTxIds.forEach((id) => {
+      if (existing.has(id)) pruned.add(id);
+    });
+    return pruned;
+  }, [selectedTxIds, transactions]);
+
+  const allVisibleSelected =
+    visibleTransactions.length > 0 &&
+    visibleTransactions.every((tx) => validSelectedIds.has(tx.id));
+
+  const toggleSelectTx = (txId: string) => {
+    setSelectedTxIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(txId)) next.delete(txId);
+      else next.add(txId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedTxIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleTransactions.forEach((tx) => next.delete(tx.id));
+      } else {
+        visibleTransactions.forEach((tx) => next.add(tx.id));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedTxIds(new Set(filtered.map((tx) => tx.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedTxIds(new Set());
+    setBatchCategory('');
+    setBatchTagMode('none');
+    setBatchTagSelection('');
+    setBatchCustomTag('');
+  };
+
+  const resolvedBatchAddTag =
+    batchTagMode === 'add_select'
+      ? batchTagSelection.trim()
+      : batchTagMode === 'add_custom'
+        ? batchCustomTag.trim()
+        : '';
+  const resolvedBatchRemoveTag = batchTagMode === 'remove' ? batchTagSelection.trim() : '';
+  const canApplyBatch =
+    validSelectedIds.size > 0 &&
+    Boolean(batchCategory || resolvedBatchAddTag || resolvedBatchRemoveTag);
+
+  const handleApplyBatchUpdate = () => {
+    if (!canApplyBatch) return;
+    const ids = Array.from(validSelectedIds);
+    const update: BatchTransactionUpdate = {
+      ...(batchCategory ? { category: batchCategory } : {}),
+      ...(resolvedBatchAddTag ? { addTag: resolvedBatchAddTag } : {}),
+      ...(resolvedBatchRemoveTag ? { removeTag: resolvedBatchRemoveTag } : {}),
+    };
+
+    let updatedCount = 0;
+    if (onBatchUpdateTransactions) {
+      updatedCount = onBatchUpdateTransactions(ids, update);
+    } else {
+      for (const tx of transactions) {
+        if (!validSelectedIds.has(tx.id)) continue;
+        const singleUpdate: Partial<Pick<Transaction, 'category' | 'spendingClass' | 'tags'>> = {};
+        if (batchCategory) {
+          singleUpdate.category = batchCategory;
+          singleUpdate.spendingClass = CATEGORIES[batchCategory].defaultClass;
+        }
+        if (resolvedBatchAddTag) {
+          singleUpdate.tags = mergeTransactionTags(tx.tags, resolvedBatchAddTag);
+        } else if (resolvedBatchRemoveTag) {
+          const nextTags = removeTransactionTag(tx.tags, resolvedBatchRemoveTag);
+          singleUpdate.tags = nextTags.length > 0 ? nextTags : undefined;
+        }
+        onUpdateTransaction(tx.id, singleUpdate);
+        updatedCount += 1;
+      }
+    }
+
+    const parts: string[] = [];
+    if (batchCategory) parts.push(`category → ${CATEGORIES[batchCategory].label}`);
+    if (resolvedBatchAddTag) parts.push(`added #${resolvedBatchAddTag}`);
+    if (resolvedBatchRemoveTag) parts.push(`removed #${resolvedBatchRemoveTag}`);
+
+    setExportNotice(
+      updatedCount > 0
+        ? `Batch updated ${updatedCount} transaction${updatedCount === 1 ? '' : 's'} (${parts.join(', ')}).`
+        : 'Selected transactions already matched the chosen category/tag.'
+    );
+    window.setTimeout(() => setExportNotice(null), 4500);
+    clearSelection();
   };
 
   const handleSaveAdvancedRule = (applyImmediately: boolean) => {
@@ -1485,6 +1602,164 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
         )}
       </section>
 
+      {/* Batch Re-Categorize & Tag Utility Bar */}
+      {filtered.length > 0 && (
+        <section
+          aria-label="Batch re-categorize and tag selected transactions"
+          className={`rounded-xl border p-3.5 sm:p-4 transition-colors ${
+            validSelectedIds.size > 0
+              ? 'bg-teal-50/70 dark:bg-teal-950/30 border-teal-300 dark:border-teal-800'
+              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5 text-xs">
+              <span className="inline-flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
+                <CheckSquare className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                Batch Re-Categorize
+              </span>
+              {validSelectedIds.size === 0 ? (
+                <span className="text-slate-500 dark:text-slate-400">
+                  Select rows below to mass-update categories or tags at once.
+                </span>
+              ) : (
+                <>
+                  <span className="px-2 py-0.5 rounded bg-teal-700 text-white font-mono-num font-semibold">
+                    {validSelectedIds.size} selected
+                  </span>
+                  {filtered.length > visibleTransactions.length &&
+                    validSelectedIds.size < filtered.length && (
+                      <button
+                        type="button"
+                        onClick={selectAllFiltered}
+                        className="text-teal-700 dark:text-teal-400 font-medium hover:underline cursor-pointer"
+                      >
+                        Select all {filtered.length} filtered
+                      </button>
+                    )}
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:underline cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                </>
+              )}
+              {validSelectedIds.size === 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAllVisible}
+                  className="text-teal-700 dark:text-teal-400 font-medium hover:underline cursor-pointer"
+                >
+                  Select visible ({visibleTransactions.length})
+                </button>
+              )}
+            </div>
+
+            {validSelectedIds.size > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="Batch target category"
+                  value={batchCategory}
+                  onChange={(e) => setBatchCategory(e.target.value as CategoryId | '')}
+                  className="min-h-[36px] px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 cursor-pointer"
+                >
+                  <option value="">Set Category (no change)</option>
+                  {Object.values(CATEGORIES).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  aria-label="Batch tag action"
+                  value={batchTagMode}
+                  onChange={(e) => {
+                    const nextMode = e.target.value as
+                      | 'none'
+                      | 'add_select'
+                      | 'add_custom'
+                      | 'remove';
+                    setBatchTagMode(nextMode);
+                    setBatchTagSelection('');
+                    setBatchCustomTag('');
+                  }}
+                  className="min-h-[36px] px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 cursor-pointer"
+                >
+                  <option value="none">Tag Action (none)</option>
+                  <option value="add_select">Add Tag from List…</option>
+                  <option value="add_custom">Add New Custom Tag…</option>
+                  {customTagStats.items.length > 0 && (
+                    <option value="remove">Remove Existing Tag…</option>
+                  )}
+                </select>
+
+                {batchTagMode === 'add_select' && (
+                  <select
+                    aria-label="Choose tag to add to selected transactions"
+                    value={batchTagSelection}
+                    onChange={(e) => setBatchTagSelection(e.target.value)}
+                    className="min-h-[36px] px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 cursor-pointer"
+                  >
+                    <option value="">Choose tag…</option>
+                    {suggestedTags.map((tag) => (
+                      <option key={tag} value={tag}>
+                        #{tag}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {batchTagMode === 'add_custom' && (
+                  <input
+                    type="text"
+                    aria-label="Custom tag label for batch update"
+                    value={batchCustomTag}
+                    onChange={(e) => setBatchCustomTag(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && canApplyBatch) {
+                        e.preventDefault();
+                        handleApplyBatchUpdate();
+                      }
+                    }}
+                    placeholder="e.g. Client Trip"
+                    className="min-h-[36px] w-36 px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
+                  />
+                )}
+
+                {batchTagMode === 'remove' && (
+                  <select
+                    aria-label="Choose tag to remove from selected transactions"
+                    value={batchTagSelection}
+                    onChange={(e) => setBatchTagSelection(e.target.value)}
+                    className="min-h-[36px] px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 cursor-pointer"
+                  >
+                    <option value="">Choose tag to remove…</option>
+                    {customTagStats.items.map((item) => (
+                      <option key={item.key} value={item.label}>
+                        #{item.label} ({item.count})
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <button
+                  type="button"
+                  disabled={!canApplyBatch}
+                  onClick={handleApplyBatchUpdate}
+                  className="min-h-[36px] inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Apply to {validSelectedIds.size}
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* High-Density Ledger Table (Desktop) + Touch List (Mobile) */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
         {filtered.length === 0 ? (
@@ -1497,6 +1772,15 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-50/70 dark:bg-slate-950/40">
+                    <th className="py-3 pl-4 pr-2 w-10">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all visible transactions"
+                        checked={allVisibleSelected}
+                        onChange={toggleSelectAllVisible}
+                        className="w-4 h-4 rounded accent-teal-700 cursor-pointer"
+                      />
+                    </th>
                     <th className="py-3 px-4 w-28">Date</th>
                     <th className="py-3 px-4">Merchant &amp; Description</th>
                     <th className="py-3 px-4 w-52">Category</th>
@@ -1506,13 +1790,14 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-sm">
-                  {filtered.slice(0, visibleLimit).map((tx) => {
+                  {visibleTransactions.map((tx) => {
                     const txCurr = tx.currency ?? currency;
                     const isForeign = txCurr !== currency;
                     const convertedAmt = getTransactionDisplayAmount(tx, currency, exchangeRates);
                     const txSmartTags = smartTagSummary.byTransactionId[tx.id] ?? [];
                     const txCustomTags = tx.tags ?? [];
                     const isEditingTags = editingTagTxId === tx.id;
+                    const isSelected = validSelectedIds.has(tx.id);
                     const existingTagSet = new Set(txCustomTags.map((t) => t.toLowerCase()));
                     const quickSuggestions = suggestedTags
                       .filter((s) => !existingTagSet.has(s.toLowerCase()))
@@ -1520,8 +1805,21 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
                     return (
                       <tr
                         key={tx.id}
-                        className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+                        className={`transition-colors ${
+                          isSelected
+                            ? 'bg-teal-50/50 dark:bg-teal-950/25'
+                            : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                        }`}
                       >
+                        <td className="py-2.5 pl-4 pr-2 align-top">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${tx.merchant} on ${tx.date}`}
+                            checked={isSelected}
+                            onChange={() => toggleSelectTx(tx.id)}
+                            className="mt-0.5 w-4 h-4 rounded accent-teal-700 cursor-pointer"
+                          />
+                        </td>
                         <td className="py-2.5 px-4 font-mono-num text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap align-top">
                           {tx.date}
                         </td>
@@ -1772,13 +2070,14 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
 
             {/* Mobile Touch Rows */}
             <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
-              {filtered.slice(0, visibleLimit).map((tx) => {
+              {visibleTransactions.map((tx) => {
                 const txCurr = tx.currency ?? currency;
                 const isForeign = txCurr !== currency;
                 const convertedAmt = getTransactionDisplayAmount(tx, currency, exchangeRates);
                 const txSmartTags = smartTagSummary.byTransactionId[tx.id] ?? [];
                 const txCustomTags = tx.tags ?? [];
                 const isEditingTags = editingTagTxId === tx.id;
+                const isSelected = validSelectedIds.has(tx.id);
                 const existingTagSet = new Set(txCustomTags.map((t) => t.toLowerCase()));
                 const quickSuggestions = suggestedTags
                   .filter((s) => !existingTagSet.has(s.toLowerCase()))
@@ -1786,8 +2085,17 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
                 return (
                   <div
                     key={tx.id}
-                    className="p-4 flex items-start justify-between gap-3"
+                    className={`p-4 flex items-start justify-between gap-3 transition-colors ${
+                      isSelected ? 'bg-teal-50/50 dark:bg-teal-950/25' : ''
+                    }`}
                   >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${tx.merchant} on ${tx.date}`}
+                      checked={isSelected}
+                      onChange={() => toggleSelectTx(tx.id)}
+                      className="mt-1 w-4 h-4 rounded accent-teal-700 shrink-0 cursor-pointer"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                         {tx.merchant}

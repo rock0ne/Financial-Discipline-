@@ -380,3 +380,76 @@ export function describeParsedSearchFilters(
 
   return badges;
 }
+
+export interface BatchTransactionUpdate {
+  category?: Transaction['category'];
+  spendingClass?: Transaction['spendingClass'];
+  addTag?: string;
+  removeTag?: string;
+}
+
+/**
+ * Applies a batch category and/or tag update to all transactions whose IDs are in `selectedIds`.
+ */
+export function applyBatchTransactionUpdate(
+  transactions: Transaction[],
+  selectedIds: Set<string>,
+  update: BatchTransactionUpdate
+): { transactions: Transaction[]; updatedCount: number } {
+  if (selectedIds.size === 0) {
+    return { transactions, updatedCount: 0 };
+  }
+
+  const normalizedAdd = update.addTag ? normalizeTransactionTag(update.addTag) : '';
+  const normalizedRemove = update.removeTag ? normalizeTransactionTag(update.removeTag) : '';
+  const hasCategory = Boolean(update.category);
+  const hasAddTag = Boolean(normalizedAdd);
+  const hasRemoveTag = Boolean(normalizedRemove);
+
+  if (!hasCategory && !hasAddTag && !hasRemoveTag) {
+    return { transactions, updatedCount: 0 };
+  }
+
+  let updatedCount = 0;
+  const nextTransactions = transactions.map((tx) => {
+    if (!selectedIds.has(tx.id)) return tx;
+
+    let changed = false;
+    let nextTx: Transaction = tx;
+
+    if (update.category) {
+      const nextClass = update.spendingClass ?? CATEGORIES[update.category].defaultClass;
+      if (tx.category !== update.category || tx.spendingClass !== nextClass) {
+        nextTx = { ...nextTx, category: update.category, spendingClass: nextClass };
+        changed = true;
+      }
+    }
+
+    if (hasAddTag) {
+      const merged = mergeTransactionTags(nextTx.tags, normalizedAdd);
+      const prev = nextTx.tags ?? [];
+      if (merged.length !== prev.length || merged.some((t, i) => t !== prev[i])) {
+        nextTx = { ...nextTx, tags: merged };
+        changed = true;
+      }
+    }
+
+    if (hasRemoveTag) {
+      const afterRemove = removeTransactionTag(nextTx.tags, normalizedRemove);
+      const prev = nextTx.tags ?? [];
+      if (afterRemove.length !== prev.length) {
+        nextTx = {
+          ...nextTx,
+          tags: afterRemove.length > 0 ? afterRemove : undefined,
+        };
+        changed = true;
+      }
+    }
+
+    if (changed) updatedCount += 1;
+    return nextTx;
+  });
+
+  return { transactions: nextTransactions, updatedCount };
+}
+

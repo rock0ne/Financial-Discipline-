@@ -21,6 +21,7 @@ import {
   Users,
 } from 'lucide-react';
 import {
+  CATEGORIES,
   DEFAULT_EXCHANGE_RATES,
   convertAmount,
   type AdvancedAutomationRule,
@@ -64,6 +65,11 @@ import {
   runLocalFinancialAnalytics,
 } from './utils/analyticsEngine';
 import { buildDedupKey } from './utils/statementParser';
+import {
+  applyBatchTransactionUpdate,
+  type BatchTransactionUpdate,
+} from './utils/ledgerFilters';
+import { downloadCurrentMonthSummaryPdf } from './utils/pdfReportGenerator';
 import { OverviewView } from './components/OverviewView';
 import { SubscriptionsView } from './components/SubscriptionsView';
 import { CutSavingsView } from './components/CutSavingsView';
@@ -786,6 +792,38 @@ export default function App() {
             : 'Updated transaction',
         }
       );
+    },
+    [payload, persistPayload]
+  );
+
+  const handleBatchUpdateTransactions = useCallback(
+    (ids: string[], update: BatchTransactionUpdate): number => {
+      if (!payload || ids.length === 0) return 0;
+      const selectedSet = new Set(ids);
+      const { transactions: nextTransactions, updatedCount } = applyBatchTransactionUpdate(
+        payload.transactions,
+        selectedSet,
+        update
+      );
+      if (updatedCount === 0) return 0;
+
+      const summaryParts: string[] = [];
+      if (update.category) summaryParts.push(CATEGORIES[update.category].label);
+      if (update.addTag) summaryParts.push(`+#${update.addTag}`);
+      if (update.removeTag) summaryParts.push(`-#${update.removeTag}`);
+
+      void persistPayload(
+        {
+          ...payload,
+          transactions: nextTransactions,
+        },
+        {
+          label: `Batch updated ${updatedCount} transaction${updatedCount === 1 ? '' : 's'}${
+            summaryParts.length > 0 ? ` (${summaryParts.join(', ')})` : ''
+          }`,
+        }
+      );
+      return updatedCount;
     },
     [payload, persistPayload]
   );
@@ -1598,6 +1636,17 @@ export default function App() {
               onUpdateCategoryCap={handleUpdateCategoryCap}
               onNavigate={setActiveTab}
               onOpenImport={() => setImportOpen(true)}
+              onExportCurrentMonthPdf={() =>
+                downloadCurrentMonthSummaryPdf({
+                  transactions: payload.transactions,
+                  analytics,
+                  categoryCaps: payload.categoryCaps,
+                  isaSettings: payload.isaSettings,
+                  debts: payload.debts ?? [],
+                  currency: payload.currency,
+                  exchangeRates: payload.exchangeRates,
+                })
+              }
               isSampleData={payload.isSampleData}
             />
           )}
@@ -1606,7 +1655,9 @@ export default function App() {
             <SubscriptionsView
               analytics={analytics}
               currency={payload.currency}
+              recurringActions={payload.recurringActions}
               onSetSubscriptionClass={handleSetSubscriptionClass}
+              onSetRecurringAction={handleSetRecurringAction}
               onNavigateWealth={() => setActiveTab('wealth')}
             />
           )}
@@ -1702,6 +1753,7 @@ export default function App() {
               categoryRules={payload.categoryRules ?? []}
               advancedRules={payload.advancedRules ?? []}
               onUpdateTransaction={handleUpdateTransaction}
+              onBatchUpdateTransactions={handleBatchUpdateTransactions}
               onApplySuggestions={handleApplyCategorySuggestions}
               onDeleteRule={handleDeleteCategoryRule}
               onAddAdvancedRule={handleAddAdvancedRule}
