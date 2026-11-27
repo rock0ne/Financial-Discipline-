@@ -725,7 +725,7 @@ export default function App() {
   const handleUpdateTransaction = useCallback(
     (
       id: string,
-      updates: Partial<Pick<Transaction, 'category' | 'spendingClass' | 'currency'>>
+      updates: Partial<Pick<Transaction, 'category' | 'spendingClass' | 'currency' | 'tags'>>
     ) => {
       if (!payload) return;
       const targetTx = payload.transactions.find((tx) => tx.id === id);
@@ -766,6 +766,12 @@ export default function App() {
         }
       }
 
+      const isTagOnlyUpdate =
+        updates.tags !== undefined &&
+        updates.category === undefined &&
+        updates.spendingClass === undefined &&
+        updates.currency === undefined;
+
       void persistPayload(
         {
           ...payload,
@@ -774,7 +780,9 @@ export default function App() {
         },
         {
           label: targetTx
-            ? `Updated "${targetTx.merchant}"`
+            ? isTagOnlyUpdate
+              ? `Updated tags on "${targetTx.merchant}"`
+              : `Updated "${targetTx.merchant}"`
             : 'Updated transaction',
         }
       );

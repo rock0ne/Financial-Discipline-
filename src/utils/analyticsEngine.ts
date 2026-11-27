@@ -3307,6 +3307,193 @@ export function computeTopMerchantsByCategoryOverTime(
   };
 }
 
+export interface SubscriptionProjectionMonth {
+  monthIndex: number; // 1..12
+  monthKey: string; // YYYY-MM
+  label: string; // e.g., "Dec 26"
+  essential: number;
+  cancelable: number;
+  total: number;
+  cumulativeBaseline: number;
+  cumulativeOptimized: number;
+}
 
+export interface SubscriptionCategoryProjection {
+  categoryId: CategoryId;
+  categoryLabel: string;
+  annualCost: number;
+  essentialAnnual: number;
+  cancelableAnnual: number;
+  sharePct: number;
+  itemCount: number;
+}
 
+export interface SubscriptionAnnualProjection {
+  horizonLabel: string; // e.g., "Dec 26 – Nov 27"
+  itemCount: number;
+  essentialCount: number;
+  cancelableCount: number;
+  hikedCount: number;
+  monthlyBaseline: number;
+  totalAnnualBaseline: number;
+  essentialAnnual: number;
+  cancelableAnnual: number;
+  optimizedAnnual: number;
+  priceHikeDriftAnnual: number;
+  projectedWithDriftAnnual: number;
+  months: SubscriptionProjectionMonth[];
+  topCategories: SubscriptionCategoryProjection[];
+}
 
+/**
+ * Projects 12 months of forward recurring expenditure from detected subscription habits,
+ * respecting Monthly, Weekly, and Quarterly billing cadences and Essential vs. Cancelable splits.
+ */
+export function computeSubscriptionAnnualProjection(
+  items: RecurringItem[],
+  referenceDate?: string
+): SubscriptionAnnualProjection {
+  // Anchor start month to the month following the latest detected billing date (or current date)
+  let anchorYear: number;
+  let anchorMonth: number; // 1..12
+
+  const latestItemDate = items
+    .map((i) => i.lastDate)
+    .filter((d) => /^\d{4}-\d{2}/.test(d))
+    .sort()
+    .pop();
+
+  const anchorSource =
+    referenceDate && /^\d{4}-\d{2}/.test(referenceDate)
+      ? referenceDate
+      : latestItemDate ?? new Date().toISOString().slice(0, 10);
+
+  anchorYear = Number(anchorSource.slice(0, 4));
+  anchorMonth = Number(anchorSource.slice(5, 7));
+
+  const months: SubscriptionProjectionMonth[] = [];
+  let cumulativeBaseline = 0;
+  let cumulativeOptimized = 0;
+
+  for (let i = 1; i <= 12; i++) {
+    const zeroBasedMonth = anchorMonth - 1 + i;
+    const year = anchorYear + Math.floor(zeroBasedMonth / 12);
+    const month = (zeroBasedMonth % 12) + 1;
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+
+    let monthEssential = 0;
+    let monthCancelable = 0;
+
+    for (const item of items) {
+      let dueThisMonth = item.monthlyCost;
+      if (item.cadence === 'Quarterly') {
+        // Quarterly charges land on months 3, 6, 9, 12 of the forward horizon
+        dueThisMonth = i % 3 === 0 ? item.monthlyCost * 3 : 0;
+      }
+
+      if (item.subscriptionClass === 'essential') {
+        monthEssential += dueThisMonth;
+      } else {
+        monthCancelable += dueThisMonth;
+      }
+    }
+
+    const roundedEssential = roundPence(monthEssential);
+    const roundedCancelable = roundPence(monthCancelable);
+    const roundedTotal = roundPence(roundedEssential + roundedCancelable);
+
+    cumulativeBaseline = roundPence(cumulativeBaseline + roundedTotal);
+    cumulativeOptimized = roundPence(cumulativeOptimized + roundedEssential);
+
+    months.push({
+      monthIndex: i,
+      monthKey,
+      label: formatMonthLabel(monthKey),
+      essential: roundedEssential,
+      cancelable: roundedCancelable,
+      total: roundedTotal,
+      cumulativeBaseline,
+      cumulativeOptimized,
+    });
+  }
+
+  const totalAnnualBaseline = roundPence(months.reduce((s, m) => s + m.total, 0));
+  const essentialAnnual = roundPence(months.reduce((s, m) => s + m.essential, 0));
+  const cancelableAnnual = roundPence(months.reduce((s, m) => s + m.cancelable, 0));
+  const monthlyBaseline = roundPence(totalAnnualBaseline / 12);
+
+  // Estimate potential annual drift if recently hiked subscriptions continue increasing (capped conservatively at +15%/yr per hiked item)
+  let priceHikeDriftAnnual = 0;
+  let hikedCount = 0;
+  for (const item of items) {
+    if (item.priceIncreasePct && item.priceIncreasePct > 0) {
+      hikedCount += 1;
+      const cappedRate = Math.min(item.priceIncreasePct, 15) / 100;
+      priceHikeDriftAnnual += item.monthlyCost * 12 * cappedRate;
+    }
+  }
+  priceHikeDriftAnnual = roundPence(priceHikeDriftAnnual);
+
+  // Group 12-month projected spend by category
+  const catMap = new Map<
+    CategoryId,
+    {
+      categoryLabel: string;
+      annualCost: number;
+      essentialAnnual: number;
+      cancelableAnnual: number;
+      itemCount: number;
+    }
+  >();
+
+  for (const item of items) {
+    const annual = roundPence(item.monthlyCost * 12);
+    const existing = catMap.get(item.categoryId) ?? {
+      categoryLabel: item.categoryLabel,
+      annualCost: 0,
+      essentialAnnual: 0,
+      cancelableAnnual: 0,
+      itemCount: 0,
+    };
+    existing.annualCost = roundPence(existing.annualCost + annual);
+    if (item.subscriptionClass === 'essential') {
+      existing.essentialAnnual = roundPence(existing.essentialAnnual + annual);
+    } else {
+      existing.cancelableAnnual = roundPence(existing.cancelableAnnual + annual);
+    }
+    existing.itemCount += 1;
+    catMap.set(item.categoryId, existing);
+  }
+
+  const topCategories: SubscriptionCategoryProjection[] = Array.from(catMap.entries())
+    .map(([categoryId, info]) => ({
+      categoryId,
+      categoryLabel: info.categoryLabel,
+      annualCost: info.annualCost,
+      essentialAnnual: info.essentialAnnual,
+      cancelableAnnual: info.cancelableAnnual,
+      sharePct: totalAnnualBaseline > 0 ? (info.annualCost / totalAnnualBaseline) * 100 : 0,
+      itemCount: info.itemCount,
+    }))
+    .sort((a, b) => b.annualCost - a.annualCost);
+
+  const horizonLabel =
+    months.length >= 12 ? `${months[0].label} – ${months[11].label}` : 'Next 12 Months';
+
+  return {
+    horizonLabel,
+    itemCount: items.length,
+    essentialCount: items.filter((i) => i.subscriptionClass === 'essential').length,
+    cancelableCount: items.filter((i) => i.subscriptionClass === 'cancelable').length,
+    hikedCount,
+    monthlyBaseline,
+    totalAnnualBaseline,
+    essentialAnnual,
+    cancelableAnnual,
+    optimizedAnnual: essentialAnnual,
+    priceHikeDriftAnnual,
+    projectedWithDriftAnnual: roundPence(totalAnnualBaseline + priceHikeDriftAnnual),
+    months,
+    topCategories,
+  };
+}

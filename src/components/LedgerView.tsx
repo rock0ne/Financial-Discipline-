@@ -10,8 +10,10 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  Tag,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import {
   CATEGORIES,
@@ -38,6 +40,14 @@ import {
   matchesAdvancedRule,
   suggestCategoryMappings,
 } from '../utils/analyticsEngine';
+import {
+  STARTER_TRANSACTION_TAGS,
+  describeParsedSearchFilters,
+  matchesLedgerSearch,
+  mergeTransactionTags,
+  parseLedgerSearchQuery,
+  removeTransactionTag,
+} from '../utils/ledgerFilters';
 
 interface LedgerViewProps {
   transactions: Transaction[];
@@ -48,7 +58,7 @@ interface LedgerViewProps {
   advancedRules: AdvancedAutomationRule[];
   onUpdateTransaction: (
     id: string,
-    updates: Partial<Pick<Transaction, 'category' | 'spendingClass' | 'currency'>>
+    updates: Partial<Pick<Transaction, 'category' | 'spendingClass' | 'currency' | 'tags'>>
   ) => void;
   onApplySuggestions: (suggestions: CategoryRuleSuggestion[]) => void;
   onDeleteRule: (ruleId: string) => void;
@@ -83,6 +93,9 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
   const [smartTagFilter, setSmartTagFilter] = useState<
     'all' | 'tax_deductible' | 'expense_claimable' | 'any_smart_tag'
   >('all');
+  const [customTagFilter, setCustomTagFilter] = useState<string>('all');
+  const [editingTagTxId, setEditingTagTxId] = useState<string | null>(null);
+  const [tagDraft, setTagDraft] = useState('');
   const [currencyFilter, setCurrencyFilter] = useState<'all' | CurrencyCode>('all');
   const [monthFilter, setMonthFilter] = useState<string>('all');
   const [minAmount, setMinAmount] = useState<string>('');
@@ -214,11 +227,57 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
     [transactions, currency, exchangeRates]
   );
 
+  const customTagStats = useMemo(() => {
+    const counts = new Map<string, { label: string; count: number }>();
+    let taggedTxCount = 0;
+    for (const tx of transactions) {
+      const tags = tx.tags ?? [];
+      if (tags.length > 0) taggedTxCount++;
+      for (const raw of tags) {
+        const key = raw.toLowerCase();
+        const existing = counts.get(key);
+        if (existing) {
+          existing.count++;
+        } else {
+          counts.set(key, { label: raw, count: 1 });
+        }
+      }
+    }
+    const items = Array.from(counts.entries())
+      .map(([key, info]) => ({ key, label: info.label, count: info.count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    return { items, taggedTxCount };
+  }, [transactions]);
+
+  const suggestedTags = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const item of customTagStats.items) {
+      if (!seen.has(item.key)) {
+        seen.add(item.key);
+        list.push(item.label);
+      }
+    }
+    for (const preset of STARTER_TRANSACTION_TAGS) {
+      const key = preset.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(preset);
+      }
+    }
+    return list;
+  }, [customTagStats.items]);
+
+  const parsedSearch = useMemo(() => parseLedgerSearchQuery(search), [search]);
+  const parsedSearchBadges = useMemo(
+    () => describeParsedSearchFilters(parsedSearch, currency),
+    [parsedSearch, currency]
+  );
+
   const parsedMin = minAmount.trim() !== '' ? Number(minAmount) : null;
   const parsedMax = maxAmount.trim() !== '' ? Number(maxAmount) : null;
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return transactions.filter((tx) => {
       if (classFilter !== 'all' && tx.spendingClass !== classFilter) return false;
 
@@ -229,6 +288,14 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
         if (!txSmartTags.some((t) => t.tag === 'expense_claimable')) return false;
       } else if (smartTagFilter === 'any_smart_tag') {
         if (txSmartTags.length === 0) return false;
+      }
+
+      const txCustomTags = tx.tags ?? [];
+      if (customTagFilter === '__any__') {
+        if (txCustomTags.length === 0) return false;
+      } else if (customTagFilter !== 'all') {
+        const targetKey = customTagFilter.toLowerCase();
+        if (!txCustomTags.some((t) => t.toLowerCase() === targetKey)) return false;
       }
 
       const txCurr = tx.currency ?? currency;
@@ -247,10 +314,11 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
         return false;
       }
 
-      if (q) {
-        const smartText = txSmartTags.map((t) => `${t.label} ${t.reason}`).join(' ');
-        const hay = `${tx.merchant} ${tx.description} ${tx.date} ${CATEGORIES[tx.category].label} ${tx.accountName} ${txCurr} ${smartText}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+      if (
+        parsedSearch.raw &&
+        !matchesLedgerSearch(tx, parsedSearch, currency, exchangeRates, txSmartTags)
+      ) {
+        return false;
       }
       return true;
     });
@@ -259,13 +327,14 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
     classFilter,
     smartTagFilter,
     smartTagSummary,
+    customTagFilter,
     currencyFilter,
     monthFilter,
     dateFrom,
     dateTo,
     parsedMin,
     parsedMax,
-    search,
+    parsedSearch,
     currency,
     exchangeRates,
   ]);
@@ -274,6 +343,7 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
     search.trim().length > 0 ||
     classFilter !== 'all' ||
     smartTagFilter !== 'all' ||
+    customTagFilter !== 'all' ||
     currencyFilter !== 'all' ||
     monthFilter !== 'all' ||
     minAmount.trim().length > 0 ||
@@ -296,6 +366,7 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
     setSearch('');
     setClassFilter('all');
     setSmartTagFilter('all');
+    setCustomTagFilter('all');
     setCurrencyFilter('all');
     setMonthFilter('all');
     setMinAmount('');
@@ -305,6 +376,36 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
     setVisibleLimit(60);
   };
 
+  const handleAddTagsToTx = (tx: Transaction, rawInput: string) => {
+    const nextTags = mergeTransactionTags(tx.tags, rawInput);
+    const prevTags = tx.tags ?? [];
+    if (
+      nextTags.length !== prevTags.length ||
+      nextTags.some((t, idx) => t !== prevTags[idx])
+    ) {
+      onUpdateTransaction(tx.id, { tags: nextTags });
+    }
+  };
+
+  const handleRemoveTagFromTx = (tx: Transaction, tagToRemove: string) => {
+    const nextTags = removeTransactionTag(tx.tags, tagToRemove);
+    onUpdateTransaction(tx.id, { tags: nextTags.length > 0 ? nextTags : undefined });
+    if (
+      customTagFilter !== 'all' &&
+      customTagFilter !== '__any__' &&
+      customTagFilter.toLowerCase() === tagToRemove.toLowerCase()
+    ) {
+      const remainingWithTag = transactions.some(
+        (item) =>
+          item.id !== tx.id &&
+          (item.tags ?? []).some((t) => t.toLowerCase() === tagToRemove.toLowerCase())
+      );
+      if (!remainingWithTag) {
+        setCustomTagFilter('all');
+      }
+    }
+  };
+
   const handleDownloadCsv = (rowsToExport: Transaction[], suffix: string) => {
     if (rowsToExport.length === 0) return;
     const fileName = downloadTransactionsCsv(rowsToExport, currency, suffix, {
@@ -312,7 +413,7 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
       smartTagsByTxId: smartTagSummary.byTransactionId,
     });
     setExportNotice(
-      `Exported ${rowsToExport.length} transaction${rowsToExport.length === 1 ? '' : 's'} with Smart Tags to ${fileName}.`
+      `Exported ${rowsToExport.length} transaction${rowsToExport.length === 1 ? '' : 's'} with Smart & Custom Tags to ${fileName}.`
     );
     window.setTimeout(() => setExportNotice(null), 4000);
   };
@@ -454,21 +555,49 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
 
       {/* Search & Multi-Criteria Filter Bar */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
-        {/* Row 1: Description Search + Class Segmented Filter */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-lg">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="search"
-              aria-label="Search transactions by description, merchant, or category"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setVisibleLimit(60);
-              }}
-              placeholder="Smart Search: merchant, description, category, tax deductible, or claimable..."
-              className="w-full min-h-[40px] pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
-            />
+        {/* Row 1: Structured Search + Class Segmented Filter */}
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-start justify-between gap-3">
+          <div className="flex-1 max-w-xl space-y-1.5">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="search"
+                aria-label="Search transactions by merchant, date range, amount, or custom tag"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setVisibleLimit(60);
+                }}
+                placeholder={`Search merchant, #tag, amount (>${currencySymbol}50, 20..80), or date (2026-10-01..2026-10-31)...`}
+                className="w-full min-h-[40px] pl-9 pr-9 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
+              />
+              {search && (
+                <button
+                  type="button"
+                  aria-label="Clear search query"
+                  onClick={() => {
+                    setSearch('');
+                    setVisibleLimit(60);
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {parsedSearchBadges.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span className="text-slate-400 dark:text-slate-500">Parsed query:</span>
+                {parsedSearchBadges.map((badge) => (
+                  <span
+                    key={badge}
+                    className="px-2 py-0.5 rounded bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800/80 font-mono-num text-teal-800 dark:text-teal-300"
+                  >
+                    {badge}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-x-auto max-w-full">
@@ -715,6 +844,81 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
               </strong>
             </span>
           </div>
+        </div>
+
+        {/* Row 4: User Custom Labels Filter */}
+        <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mr-1">
+            <Tag className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+            Custom Tags
+          </span>
+          {customTagStats.items.length === 0 ? (
+            <span className="text-xs text-slate-400 dark:text-slate-500">
+              No custom tags yet — click &ldquo;+ Tag&rdquo; on any transaction below to label it.
+            </span>
+          ) : (
+            <div
+              className="flex flex-wrap items-center gap-1.5"
+              role="group"
+              aria-label="Filter by custom transaction tags"
+            >
+              <button
+                type="button"
+                aria-pressed={customTagFilter === 'all'}
+                onClick={() => {
+                  setCustomTagFilter('all');
+                  setVisibleLimit(60);
+                }}
+                className={`min-h-[30px] px-2.5 py-1 text-xs font-medium rounded-md border transition-colors cursor-pointer ${
+                  customTagFilter === 'all'
+                    ? 'border-slate-900 dark:border-slate-100 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                aria-pressed={customTagFilter === '__any__'}
+                onClick={() => {
+                  setCustomTagFilter((prev) => (prev === '__any__' ? 'all' : '__any__'));
+                  setVisibleLimit(60);
+                }}
+                className={`min-h-[30px] px-2.5 py-1 text-xs font-medium rounded-md border transition-colors cursor-pointer ${
+                  customTagFilter === '__any__'
+                    ? 'border-teal-700 bg-teal-700 text-white'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                Any Tagged{' '}
+                <span className="font-mono-num opacity-75">({customTagStats.taggedTxCount})</span>
+              </button>
+              {customTagStats.items.map((item) => {
+                const isActive = customTagFilter.toLowerCase() === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => {
+                      setCustomTagFilter((prev) =>
+                        prev.toLowerCase() === item.key ? 'all' : item.label
+                      );
+                      setVisibleLimit(60);
+                    }}
+                    className={`min-h-[30px] px-2.5 py-1 text-xs font-medium rounded-md border transition-colors cursor-pointer ${
+                      isActive
+                        ? 'border-teal-700 bg-teal-700 text-white'
+                        : 'border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/60 text-slate-700 dark:text-slate-200 hover:border-teal-600/50'
+                    }`}
+                  >
+                    #{item.label}{' '}
+                    <span className="font-mono-num opacity-70">({item.count})</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Filter Results Summary Strip */}
@@ -1307,15 +1511,21 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
                     const isForeign = txCurr !== currency;
                     const convertedAmt = getTransactionDisplayAmount(tx, currency, exchangeRates);
                     const txSmartTags = smartTagSummary.byTransactionId[tx.id] ?? [];
+                    const txCustomTags = tx.tags ?? [];
+                    const isEditingTags = editingTagTxId === tx.id;
+                    const existingTagSet = new Set(txCustomTags.map((t) => t.toLowerCase()));
+                    const quickSuggestions = suggestedTags
+                      .filter((s) => !existingTagSet.has(s.toLowerCase()))
+                      .slice(0, 5);
                     return (
                       <tr
                         key={tx.id}
                         className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
                       >
-                        <td className="py-2.5 px-4 font-mono-num text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        <td className="py-2.5 px-4 font-mono-num text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap align-top">
                           {tx.date}
                         </td>
-                        <td className="py-2.5 px-4 max-w-xs">
+                        <td className="py-2.5 px-4 max-w-sm align-top">
                           <p className="font-medium text-slate-900 dark:text-slate-100 truncate">
                             {tx.merchant}
                           </p>
@@ -1345,6 +1555,125 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
                               ))}
                             </p>
                           )}
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                            {txCustomTags.map((label) => (
+                              <span
+                                key={label}
+                                className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-[11px] font-medium text-slate-700 dark:text-slate-200"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCustomTagFilter((prev) =>
+                                      prev.toLowerCase() === label.toLowerCase() ? 'all' : label
+                                    );
+                                    setVisibleLimit(60);
+                                  }}
+                                  title={`Filter ledger by #${label}`}
+                                  className="hover:text-teal-700 dark:hover:text-teal-400 cursor-pointer"
+                                >
+                                  #{label}
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Remove tag ${label} from ${tx.merchant}`}
+                                  onClick={() => handleRemoveTagFromTx(tx, label)}
+                                  className="p-0.5 rounded text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              </span>
+                            ))}
+                            {!isEditingTags ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingTagTxId(tx.id);
+                                  setTagDraft('');
+                                }}
+                                aria-label={`Add custom tag to ${tx.merchant}`}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-[11px] text-slate-500 dark:text-slate-400 hover:border-teal-600 hover:text-teal-700 dark:hover:text-teal-400 transition-colors cursor-pointer"
+                              >
+                                <Plus className="w-2.5 h-2.5" />
+                                Tag
+                              </button>
+                            ) : (
+                              <div className="w-full mt-1 p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 space-y-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    value={tagDraft}
+                                    aria-label={`New tag for ${tx.merchant}`}
+                                    placeholder="Label (Enter or comma)..."
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val.includes(',')) {
+                                        handleAddTagsToTx(tx, val);
+                                        setTagDraft('');
+                                      } else {
+                                        setTagDraft(val);
+                                      }
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        if (tagDraft.trim()) {
+                                          handleAddTagsToTx(tx, tagDraft);
+                                          setTagDraft('');
+                                        } else {
+                                          setEditingTagTxId(null);
+                                        }
+                                      } else if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        setEditingTagTxId(null);
+                                        setTagDraft('');
+                                      }
+                                    }}
+                                    className="flex-1 min-w-[120px] px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-teal-600"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (tagDraft.trim()) {
+                                        handleAddTagsToTx(tx, tagDraft);
+                                        setTagDraft('');
+                                      }
+                                    }}
+                                    disabled={!tagDraft.trim()}
+                                    className="px-2 py-1 rounded bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-[11px] font-medium cursor-pointer"
+                                  >
+                                    Add
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingTagTxId(null);
+                                      setTagDraft('');
+                                    }}
+                                    className="px-1.5 py-1 rounded text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                                  >
+                                    Done
+                                  </button>
+                                </div>
+                                {quickSuggestions.length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <span className="text-[10px] text-slate-400 mr-0.5">Quick:</span>
+                                    {quickSuggestions.map((preset) => (
+                                      <button
+                                        key={preset}
+                                        type="button"
+                                        onClick={() => handleAddTagsToTx(tx, preset)}
+                                        className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] text-slate-600 dark:text-slate-300 hover:border-teal-600 hover:text-teal-700 dark:hover:text-teal-400 cursor-pointer"
+                                      >
+                                        +{preset}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="py-2.5 px-4">
                           <select
@@ -1448,12 +1777,18 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
                 const isForeign = txCurr !== currency;
                 const convertedAmt = getTransactionDisplayAmount(tx, currency, exchangeRates);
                 const txSmartTags = smartTagSummary.byTransactionId[tx.id] ?? [];
+                const txCustomTags = tx.tags ?? [];
+                const isEditingTags = editingTagTxId === tx.id;
+                const existingTagSet = new Set(txCustomTags.map((t) => t.toLowerCase()));
+                const quickSuggestions = suggestedTags
+                  .filter((s) => !existingTagSet.has(s.toLowerCase()))
+                  .slice(0, 5);
                 return (
                   <div
                     key={tx.id}
-                    className="p-4 flex items-center justify-between gap-3"
+                    className="p-4 flex items-start justify-between gap-3"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                         {tx.merchant}
                       </p>
@@ -1484,11 +1819,128 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
                           ))}
                         </p>
                       )}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {txCustomTags.map((label) => (
+                          <span
+                            key={label}
+                            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-[11px] font-medium text-slate-700 dark:text-slate-200"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCustomTagFilter((prev) =>
+                                  prev.toLowerCase() === label.toLowerCase() ? 'all' : label
+                                );
+                                setVisibleLimit(60);
+                              }}
+                              className="cursor-pointer"
+                            >
+                              #{label}
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Remove tag ${label} from ${tx.merchant}`}
+                              onClick={() => handleRemoveTagFromTx(tx, label)}
+                              className="p-0.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                        {!isEditingTags ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingTagTxId(tx.id);
+                              setTagDraft('');
+                            }}
+                            aria-label={`Add custom tag to ${tx.merchant}`}
+                            className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-[11px] text-slate-500 dark:text-slate-400 hover:border-teal-600 hover:text-teal-700 dark:hover:text-teal-400 cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Tag
+                          </button>
+                        ) : (
+                          <div className="w-full mt-1 p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 space-y-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                autoFocus
+                                value={tagDraft}
+                                aria-label={`New tag for ${tx.merchant}`}
+                                placeholder="Add label..."
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val.includes(',')) {
+                                    handleAddTagsToTx(tx, val);
+                                    setTagDraft('');
+                                  } else {
+                                    setTagDraft(val);
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (tagDraft.trim()) {
+                                      handleAddTagsToTx(tx, tagDraft);
+                                      setTagDraft('');
+                                    } else {
+                                      setEditingTagTxId(null);
+                                    }
+                                  } else if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingTagTxId(null);
+                                    setTagDraft('');
+                                  }
+                                }}
+                                className="flex-1 min-w-[100px] px-2 py-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-teal-600"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (tagDraft.trim()) {
+                                    handleAddTagsToTx(tx, tagDraft);
+                                    setTagDraft('');
+                                  }
+                                }}
+                                disabled={!tagDraft.trim()}
+                                className="px-2.5 py-1.5 rounded bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-xs font-medium cursor-pointer"
+                              >
+                                Add
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingTagTxId(null);
+                                  setTagDraft('');
+                                }}
+                                className="px-1.5 py-1.5 text-xs text-slate-500 cursor-pointer"
+                              >
+                                Done
+                              </button>
+                            </div>
+                            {quickSuggestions.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {quickSuggestions.map((preset) => (
+                                  <button
+                                    key={preset}
+                                    type="button"
+                                    onClick={() => handleAddTagsToTx(tx, preset)}
+                                    className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer"
+                                  >
+                                    +{preset}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       {tx.spendingClass !== 'income' && tx.spendingClass !== 'savings' && (
                         <button
                           type="button"
                           onClick={() => toggleEssentialClass(tx)}
-                          className={`mt-1 text-xs font-medium underline-offset-2 hover:underline cursor-pointer ${
+                          className={`mt-1.5 text-xs font-medium underline-offset-2 hover:underline cursor-pointer ${
                             tx.spendingClass === 'essential'
                               ? 'text-slate-600 dark:text-slate-400'
                               : 'text-amber-700 dark:text-amber-400'

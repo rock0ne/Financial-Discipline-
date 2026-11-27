@@ -2,15 +2,30 @@ import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  CalendarRange,
   Repeat,
   Search,
+  TrendingUp,
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import {
   formatMoney,
   type CurrencyCode,
   type SubscriptionClass,
 } from '../types/finance';
-import type { AnalyticsResult } from '../utils/analyticsEngine';
+import {
+  computeSubscriptionAnnualProjection,
+  type AnalyticsResult,
+  type SubscriptionProjectionMonth,
+} from '../utils/analyticsEngine';
 
 interface SubscriptionsViewProps {
   analytics: AnalyticsResult;
@@ -27,12 +42,35 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
 }) => {
   const [filter, setFilter] = useState<'all' | 'cancelable' | 'essential' | 'hiked'>('all');
   const [search, setSearch] = useState('');
+  const [projectionScenario, setProjectionScenario] = useState<'baseline' | 'optimized'>('baseline');
 
   const items = analytics.recurringItems;
   const totalMonthly = items.reduce((s, i) => s + i.monthlyCost, 0);
   const cancelableCount = items.filter((i) => i.subscriptionClass === 'cancelable').length;
   const essentialCount = items.filter((i) => i.subscriptionClass === 'essential').length;
   const hikedCount = items.filter((i) => (i.priceIncreasePct ?? 0) > 0).length;
+
+  const annualProjection = useMemo(
+    () => computeSubscriptionAnnualProjection(items),
+    [items]
+  );
+
+  const annualizedIncome = analytics.avgMonthlyIncome * 12;
+  const activeProjectedAnnual =
+    projectionScenario === 'baseline'
+      ? annualProjection.totalAnnualBaseline
+      : annualProjection.optimizedAnnual;
+  const incomeSharePct =
+    annualizedIncome > 0 ? (activeProjectedAnnual / annualizedIncome) * 100 : null;
+
+  const essentialSharePct =
+    annualProjection.totalAnnualBaseline > 0
+      ? (annualProjection.essentialAnnual / annualProjection.totalAnnualBaseline) * 100
+      : 0;
+  const cancelableSharePct =
+    annualProjection.totalAnnualBaseline > 0
+      ? (annualProjection.cancelableAnnual / annualProjection.totalAnnualBaseline) * 100
+      : 0;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -131,6 +169,304 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
           </p>
         </div>
       </div>
+
+      {/* 12-Month Recurring Expenditure Projection Card */}
+      <section
+        aria-label="12-month recurring expenditure projection"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-5"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <CalendarRange className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                12-Month Recurring Expenditure Projection
+              </h2>
+            </div>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              {annualProjection.horizonLabel} · Estimated annual outflow from{' '}
+              <span className="font-mono-num">{annualProjection.itemCount}</span> detected subscription habit
+              {annualProjection.itemCount === 1 ? '' : 's'}
+            </p>
+          </div>
+
+          {items.length > 0 && (
+            <div
+              className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg self-start sm:self-auto"
+              role="group"
+              aria-label="12-month projection scenario"
+            >
+              <button
+                type="button"
+                aria-pressed={projectionScenario === 'baseline'}
+                onClick={() => setProjectionScenario('baseline')}
+                className={`min-h-[34px] px-3 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                  projectionScenario === 'baseline'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Current Habits
+              </button>
+              <button
+                type="button"
+                aria-pressed={projectionScenario === 'optimized'}
+                onClick={() => setProjectionScenario('optimized')}
+                className={`min-h-[34px] px-3 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                  projectionScenario === 'optimized'
+                    ? 'bg-teal-700 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                If Cancelable Cut
+              </button>
+            </div>
+          )}
+        </div>
+
+        {items.length === 0 ? (
+          <div className="py-8 text-center text-sm text-slate-500 dark:text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-lg">
+            Upload at least two months of bank statements to detect recurring habits and project your 12-month subscription commitment.
+          </div>
+        ) : (
+          <>
+            {/* Projection Summary Row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  {projectionScenario === 'baseline'
+                    ? 'Projected 12-Month Commitment'
+                    : 'Lean 12-Month Commitment'}
+                </p>
+                <p className="mt-1.5 text-2xl font-semibold font-mono-num text-slate-900 dark:text-slate-100">
+                  {formatMoney(activeProjectedAnnual, currency, 2)}
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 font-mono-num">
+                  {formatMoney(activeProjectedAnnual / 12, currency, 2)}/mo avg
+                  {incomeSharePct !== null && (
+                    <span> · {incomeSharePct.toFixed(1)}% of annual income</span>
+                  )}
+                </p>
+              </div>
+
+              <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-500 dark:text-slate-400">
+                    Annual Habit Mix
+                  </span>
+                  <span className="font-mono-num text-slate-600 dark:text-slate-300">
+                    {essentialSharePct.toFixed(0)}% Essential · {cancelableSharePct.toFixed(0)}% Cancelable
+                  </span>
+                </div>
+                <div
+                  className="mt-2.5 h-2.5 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden flex"
+                  aria-label={`Essential ${essentialSharePct.toFixed(0)}%, Cancelable ${cancelableSharePct.toFixed(0)}%`}
+                >
+                  <div
+                    className="h-full bg-teal-700 dark:bg-teal-500 transition-all"
+                    style={{ width: `${essentialSharePct}%` }}
+                  />
+                  {projectionScenario === 'baseline' && (
+                    <div
+                      className="h-full bg-amber-500 dark:bg-amber-400 transition-all"
+                      style={{ width: `${cancelableSharePct}%` }}
+                    />
+                  )}
+                </div>
+                <div className="mt-2 flex items-center justify-between text-xs font-mono-num text-slate-600 dark:text-slate-400">
+                  <span>
+                    Essential:{' '}
+                    <strong className="text-slate-900 dark:text-slate-100">
+                      {formatMoney(annualProjection.essentialAnnual, currency, 2)}
+                    </strong>
+                  </span>
+                  <span>
+                    Cancelable:{' '}
+                    <strong className="text-amber-700 dark:text-amber-400">
+                      {formatMoney(annualProjection.cancelableAnnual, currency, 2)}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+
+              <div
+                className={`p-4 rounded-lg border ${
+                  projectionScenario === 'optimized' || annualProjection.cancelableAnnual > 0
+                    ? 'bg-teal-50/50 dark:bg-teal-950/20 border-teal-200/80 dark:border-teal-900/60'
+                    : 'bg-slate-50 dark:bg-slate-950/60 border-slate-200/80 dark:border-slate-800'
+                }`}
+              >
+                <p className="text-xs font-medium text-teal-800 dark:text-teal-300">
+                  12-Month Reclaimable Cash
+                </p>
+                <p className="mt-1.5 text-2xl font-semibold font-mono-num text-teal-700 dark:text-teal-400">
+                  {formatMoney(annualProjection.cancelableAnnual, currency, 2)}
+                </p>
+                {annualProjection.priceHikeDriftAnnual > 0 ? (
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                    <TrendingUp className="w-3.5 h-3.5 shrink-0" />
+                    <span className="font-mono-num">
+                      +{formatMoney(annualProjection.priceHikeDriftAnnual, currency, 2)}/yr
+                    </span>{' '}
+                    if {annualProjection.hikedCount} price hike
+                    {annualProjection.hikedCount === 1 ? '' : 's'} repeat
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-teal-800/80 dark:text-teal-300/80">
+                    {cancelableCount > 0
+                      ? `Cutting ${cancelableCount} cancelable habit${cancelableCount === 1 ? '' : 's'} drops annual spend to ${formatMoney(annualProjection.optimizedAnnual, currency, 2)}`
+                      : 'All detected subscriptions are marked Essential'}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* 12-Month Projection Bar Chart + Top Annual Habit Drivers */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              <div className="lg:col-span-8">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                    Month-by-Month Recurring Outflow Forecast
+                  </p>
+                  <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-teal-700 dark:bg-teal-500 inline-block" />
+                      Essential
+                    </span>
+                    {projectionScenario === 'baseline' && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-xs bg-amber-500 inline-block" />
+                        Cancelable
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="h-52 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={annualProjection.months}
+                      margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" strokeOpacity={0.6} />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 11, fill: '#64748b' }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: '#64748b' }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={56}
+                        tickFormatter={(val: number) => formatMoney(val, currency, 0)}
+                      />
+                      <Tooltip
+                        cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }}
+                        content={({ active, payload }) => {
+                          if (!active || !payload || payload.length === 0) return null;
+                          const pt = payload[0].payload as SubscriptionProjectionMonth;
+                          const shownMonthTotal =
+                            projectionScenario === 'baseline' ? pt.total : pt.essential;
+                          const shownCumulative =
+                            projectionScenario === 'baseline'
+                              ? pt.cumulativeBaseline
+                              : pt.cumulativeOptimized;
+                          return (
+                            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 shadow-md text-xs space-y-1">
+                              <p className="font-semibold text-slate-900 dark:text-slate-100">
+                                {pt.label} (Month {pt.monthIndex}/12)
+                              </p>
+                              <div className="flex items-center justify-between gap-4 font-mono-num">
+                                <span className="text-slate-500 dark:text-slate-400">Essential:</span>
+                                <span className="text-slate-900 dark:text-slate-100">
+                                  {formatMoney(pt.essential, currency, 2)}
+                                </span>
+                              </div>
+                              {projectionScenario === 'baseline' && (
+                                <div className="flex items-center justify-between gap-4 font-mono-num">
+                                  <span className="text-amber-700 dark:text-amber-400">Cancelable:</span>
+                                  <span className="text-amber-700 dark:text-amber-400">
+                                    {formatMoney(pt.cancelable, currency, 2)}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="pt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4 font-mono-num font-semibold">
+                                <span className="text-slate-600 dark:text-slate-300">Month Total:</span>
+                                <span className="text-slate-900 dark:text-slate-100">
+                                  {formatMoney(shownMonthTotal, currency, 2)}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-4 font-mono-num text-[11px] text-teal-700 dark:text-teal-400">
+                                <span>Cumulative YTD:</span>
+                                <span>{formatMoney(shownCumulative, currency, 2)}</span>
+                              </div>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Bar
+                        dataKey="essential"
+                        stackId="sub"
+                        fill="#0f766e"
+                        radius={
+                          projectionScenario === 'optimized' || annualProjection.cancelableAnnual === 0
+                            ? [4, 4, 0, 0]
+                            : [0, 0, 0, 0]
+                        }
+                      />
+                      {projectionScenario === 'baseline' && (
+                        <Bar
+                          dataKey="cancelable"
+                          stackId="sub"
+                          fill="#f59e0b"
+                          radius={[4, 4, 0, 0]}
+                        />
+                      )}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="lg:col-span-4 space-y-2.5">
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Top Annual Habit Categories
+                </p>
+                <div className="space-y-2.5">
+                  {annualProjection.topCategories.slice(0, 5).map((cat) => {
+                    const shownCatAnnual =
+                      projectionScenario === 'baseline' ? cat.annualCost : cat.essentialAnnual;
+                    const denom =
+                      projectionScenario === 'baseline'
+                        ? annualProjection.totalAnnualBaseline
+                        : annualProjection.optimizedAnnual;
+                    const pct = denom > 0 ? (shownCatAnnual / denom) * 100 : 0;
+                    return (
+                      <div key={cat.categoryId} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="text-slate-700 dark:text-slate-300 truncate">
+                            {cat.categoryLabel}{' '}
+                            <span className="text-slate-400 font-mono-num">({cat.itemCount})</span>
+                          </span>
+                          <span className="font-mono-num font-medium text-slate-900 dark:text-slate-100 shrink-0">
+                            {formatMoney(shownCatAnnual, currency, 2)}
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-teal-700/80 dark:bg-teal-500/80 transition-all"
+                            style={{ width: `${Math.min(100, Math.max(pct, shownCatAnnual > 0 ? 3 : 0))}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
 
       {/* Overlap Insight Callout (clean hairline container, no thick left border) */}
       {discretionarySubCount >= 4 && (

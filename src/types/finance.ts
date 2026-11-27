@@ -53,6 +53,7 @@ export interface Transaction {
   importBatchId?: string;
   isRecurring?: boolean;
   notes?: string;
+  tags?: string[];
 }
 
 export interface StatementImportMeta {

@@ -441,6 +441,7 @@ export function exportTransactionsToCsv(
     'Category',
     'Classification',
     'SmartTags',
+    'CustomTags',
     'Account',
     'SourceFile',
     'Notes',
@@ -460,6 +461,7 @@ export function exportTransactionsToCsv(
       const displayAmt = getTransactionDisplayAmount(tx, defaultCurrency, exchangeRates);
       const tagMatches = smartTagsByTxId?.[tx.id] ?? [];
       const smartTags = escapeCsvText(tagMatches.map((t) => t.label).join('; '));
+      const customTags = escapeCsvText((tx.tags ?? []).join('; '));
       return [
         tx.date,
         merchant,
@@ -470,6 +472,7 @@ export function exportTransactionsToCsv(
         catLabel,
         tx.spendingClass,
         smartTags,
+        customTags,
         acc,
         source,
         notes,
