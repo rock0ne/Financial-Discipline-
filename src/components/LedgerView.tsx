@@ -631,25 +631,41 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-          {isFiltered && filtered.length > 0 && (
-            <button
-              type="button"
-              onClick={() => handleDownloadCsv(filtered, 'filtered_ledger')}
-              className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export Filtered ({filtered.length})
-            </button>
-          )}
           <button
             type="button"
-            disabled={transactions.length === 0}
-            onClick={() => handleDownloadCsv(transactions, 'full_ledger')}
+            disabled={filtered.length === 0}
+            aria-label={
+              isFiltered
+                ? `Download CSV of ${filtered.length} filtered transactions`
+                : `Download CSV of ${filtered.length} transactions`
+            }
+            title={
+              isFiltered
+                ? `Export ${filtered.length} currently filtered transaction${filtered.length === 1 ? '' : 's'} to CSV`
+                : `Export ${filtered.length} ledger transaction${filtered.length === 1 ? '' : 's'} to CSV`
+            }
+            onClick={() =>
+              handleDownloadCsv(filtered, isFiltered ? 'filtered_ledger' : 'ledger')
+            }
             className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            Export Ledger CSV
+            Download CSV
+            {isFiltered && (
+              <span className="font-mono-num text-[11px] text-teal-700 dark:text-teal-400">
+                ({filtered.length})
+              </span>
+            )}
           </button>
+          {isFiltered && transactions.length > filtered.length && (
+            <button
+              type="button"
+              onClick={() => handleDownloadCsv(transactions, 'full_ledger')}
+              className="min-h-[42px] inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              All CSV ({transactions.length})
+            </button>
+          )}
           <button
             type="button"
             onClick={onOpenImport}
@@ -678,28 +694,39 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
+                id="ledger-search-input"
                 type="search"
-                aria-label="Search transactions by merchant, date range, amount, or custom tag"
+                aria-label="Search transactions by merchant name or tag"
                 value={search}
                 onChange={(e) => {
                   setSearch(e.target.value);
                   setVisibleLimit(60);
                 }}
-                placeholder={`Search merchant, #tag, amount (>${currencySymbol}50, 20..80), or date (2026-10-01..2026-10-31)...`}
-                className="w-full min-h-[40px] pl-9 pr-9 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
+                placeholder={`Search by merchant name or #tag (also supports >${currencySymbol}50, 2026-10)...`}
+                className={`w-full min-h-[40px] pl-9 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-teal-600 ${
+                  search ? 'pr-28' : 'pr-4'
+                }`}
               />
               {search && (
-                <button
-                  type="button"
-                  aria-label="Clear search query"
-                  onClick={() => {
-                    setSearch('');
-                    setVisibleLimit(60);
-                  }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                  <span
+                    aria-live="polite"
+                    className="text-[11px] font-mono-num text-slate-500 dark:text-slate-400 whitespace-nowrap"
+                  >
+                    {filtered.length} {filtered.length === 1 ? 'match' : 'matches'}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Clear search query"
+                    onClick={() => {
+                      setSearch('');
+                      setVisibleLimit(60);
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
             </div>
             {parsedSearchBadges.length > 0 && (

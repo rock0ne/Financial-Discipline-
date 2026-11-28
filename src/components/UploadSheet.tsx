@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Calendar,
   Download,
   FileSpreadsheet,
   FolderOpen,
@@ -19,10 +20,6 @@ import {
 } from '../types/finance';
 import { exportTransactionsToCsv, parseStatementContent } from '../utils/statementParser';
 import { parsePdfStatementFile } from '../utils/pdfStatementReader';
-import {
-  applyConfirmedPdfAccountLabels,
-  isValidPdfAccountLabel,
-} from '../utils/importCommit';
 import { generateSample14MonthData } from '../utils/sampleData';
 import {
   applyCategorySuggestions,
@@ -42,17 +39,13 @@ interface UploadSheetProps {
     transactions: Transaction[],
     meta: StatementImportMeta[],
     replaceExisting: boolean
-  ) => Promise<{ added: number; skipped: number }>;
-  onVerifyImportStatus: (
+  ) => { added: number; skipped: number } | Promise<{ added: number; skipped: number }>;
+  onVerifyImportStatus?: (
     meta: StatementImportMeta[]
   ) => Promise<'saved' | 'absent' | 'unknown'>;
 }
 
 const SUPPORTED_EXTENSIONS = ['.csv', '.tsv', '.ofx', '.qfx', '.json', '.pdf'];
-const MAX_INPUT_FILES = 200;
-const MAX_TOTAL_INPUT_BYTES = 50 * 1024 * 1024;
-const MAX_TEXT_INPUT_BYTES = 20 * 1024 * 1024;
-const PDF_PREVIEW_PAGE_SIZE = 40;
 
 function isSupportedStatementFile(fileName: string): boolean {
   const lower = fileName.toLowerCase();
@@ -171,18 +164,16 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
     () => new Set()
   );
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [failedFiles, setFailedFiles] = useState(0);
-  const [hasStagedPdf, setHasStagedPdf] = useState(false);
-  const [reviewedPdf, setReviewedPdf] = useState(false);
-  const [acceptPartial, setAcceptPartial] = useState(false);
-  const [pdfPreviewPage, setPdfPreviewPage] = useState(0);
-  const [pdfAccountLabels, setPdfAccountLabels] = useState<Record<string, string>>({});
-  const [saveUncertain, setSaveUncertain] = useState(false);
   const [resultBanner, setResultBanner] = useState<string | null>(null);
+  const [pdfPeriodStart, setPdfPeriodStart] = useState('');
+  const [pdfPeriodEnd, setPdfPeriodEnd] = useState('');
+  const [showPdfPeriodControls, setShowPdfPeriodControls] = useState(false);
+  const [lastSelectedItems, setLastSelectedItems] = useState<
+    Array<{ file: File; displayPath: string }>
+  >([]);
+  const [lastFromFolder, setLastFromFolder] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
-  const busyRef = useRef(false);
-  const uncertainRef = useRef(false);
 
   // Set webkitdirectory / directory attributes imperatively for cross-browser folder selection
   useEffect(() => {
@@ -219,48 +210,22 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
     return Array.from(set);
   }, [stagedTransactions, primaryCurrency]);
 
-  const pdfPreviewRows = useMemo(
-    () => stagedTransactions.filter((tx) => tx.sourceFile?.toLowerCase().endsWith('.pdf')),
-    [stagedTransactions]
-  );
-  const pdfMetas = useMemo(
-    () => stagedMeta.filter((meta) => meta.fileName.toLowerCase().endsWith('.pdf')),
-    [stagedMeta]
-  );
-  const pdfLabelsValid = pdfMetas.every((meta) =>
-    isValidPdfAccountLabel(pdfAccountLabels[meta.id])
-  );
-  const knownAccountNames = useMemo(
-    () => isSampleData
-      ? []
-      : [...new Set(existingTransactions.map((tx) => tx.accountName.trim()).filter(Boolean))].slice(0, 50),
-    [existingTransactions, isSampleData]
-  );
-
   if (!open) return null;
 
   const processCollectedFiles = async (
     items: Array<{ file: File; displayPath: string }>,
-    fromFolder: boolean
+    fromFolder: boolean,
+    periodOverride?: { start?: string; end?: string }
   ) => {
-    if (items.length === 0 || busyRef.current || uncertainRef.current) return;
-    busyRef.current = true;
+    if (items.length === 0) return;
     setScanning(true);
-    setResultBanner(null);
+    setLastSelectedItems(items);
+    setLastFromFolder(fromFolder);
+
+    const activePeriodStart = (periodOverride?.start ?? pdfPeriodStart).trim() || undefined;
+    const activePeriodEnd = (periodOverride?.end ?? pdfPeriodEnd).trim() || undefined;
 
     try {
-      if (
-        items.length > MAX_INPUT_FILES ||
-        items.reduce((total, item) => total + item.file.size, 0) > MAX_TOTAL_INPUT_BYTES
-      ) {
-        setWarnings(['Selection exceeds the 200-file or 50 MiB local-import limit. No files were staged.']);
-        setStagedTransactions([]);
-        setStagedMeta([]);
-        setHasStagedPdf(false);
-        setPdfAccountLabels({});
-        setFailedFiles(0);
-        return;
-      }
       const supported = items
         .filter(({ file }) => isSupportedStatementFile(file.name))
         .sort((a, b) => a.displayPath.localeCompare(b.displayPath));
@@ -269,36 +234,25 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
       const allParsed: Transaction[] = [];
       const metas: StatementImportMeta[] = [];
       const allWarnings: string[] = [];
-      let failed = 0;
-      let pdfParsed = false;
 
       if (supported.length === 0) {
         allWarnings.push(
-          'No supported statement files (.csv, .tsv, .ofx, .qfx, .json, .pdf) were found in the selected folder or files.'
+          'No supported statement files (.pdf, .csv, .tsv, .ofx, .qfx, .json) were found in the selected folder or files.'
         );
       }
 
       for (const { file, displayPath } of supported) {
-        try {
-          const isPdf = file.name.toLowerCase().endsWith('.pdf');
-          if (!isPdf && file.size > MAX_TEXT_INPUT_BYTES) {
-            failed++;
-            allWarnings.push(`${displayPath}: File exceeds the 20 MiB text-statement limit.`);
-            continue;
-          }
-          const result = isPdf
-            ? await parsePdfStatementFile(file, displayPath)
-            : parseStatementContent(await file.text(), displayPath);
-          const { transactions, warnings: fileWarnings } = result;
-          allWarnings.push(...fileWarnings.map((msg) => `${displayPath}: ${msg}`));
-          if (transactions.length === 0) {
-            failed++;
-            if (fileWarnings.length === 0) {
-              allWarnings.push(`${displayPath}: No transaction rows were parsed.`);
-            }
-            continue;
-          }
-          if (isPdf) pdfParsed = true;
+        const isPdf = file.name.toLowerCase().endsWith('.pdf');
+        const { transactions, warnings: w } = isPdf
+          ? await parsePdfStatementFile(file, displayPath, {
+              statementPeriodStart: activePeriodStart,
+              statementPeriodEnd: activePeriodEnd,
+              defaultCurrency: primaryCurrency,
+            })
+          : parseStatementContent(await file.text(), displayPath);
+
+        allWarnings.push(...w.map((msg) => `${displayPath}: ${msg}`));
+        if (transactions.length > 0) {
           const batchId = `imp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const sortedDates = transactions.map((t) => t.date).sort();
           allParsed.push(
@@ -316,9 +270,6 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
             dateRangeStart: sortedDates[0],
             dateRangeEnd: sortedDates[sortedDates.length - 1],
           });
-        } catch {
-          failed++;
-          allWarnings.push(`${displayPath}: Could not read this file. It was not staged.`);
         }
       }
 
@@ -334,12 +285,7 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
       setStagedMeta(metas);
       setAcceptedSuggestionIds(new Set(initialSuggestions.map((s) => s.transactionId)));
       setWarnings(allWarnings);
-      setFailedFiles(failed);
-      setHasStagedPdf(pdfParsed);
-      setReviewedPdf(false);
-      setAcceptPartial(false);
-      setPdfPreviewPage(0);
-      setPdfAccountLabels({});
+      setResultBanner(null);
 
       if (fromFolder || supported.some((s) => s.displayPath.includes('/'))) {
         const rootFolder = supported[0]?.displayPath.split('/')[0];
@@ -347,7 +293,6 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
           rootFolder ? `Folder "${rootFolder}"` : 'Folder scan',
           `${metas.length} statement file${metas.length === 1 ? '' : 's'} parsed`,
         ];
-        if (failed > 0) parts.push(`${failed} supported file${failed === 1 ? '' : 's'} failed`);
         if (skippedUnsupported > 0) {
           parts.push(
             `${skippedUnsupported} non-statement file${skippedUnsupported === 1 ? '' : 's'} ignored`
@@ -359,12 +304,10 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
       }
     } finally {
       setScanning(false);
-      busyRef.current = false;
     }
   };
 
   const processFileList = async (fileList: FileList | File[], fromFolder = false) => {
-    if (busyRef.current || uncertainRef.current) return;
     const items = Array.from(fileList).map((file) => ({
       file,
       displayPath:
@@ -383,40 +326,24 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
   };
 
   const handleConfirm = async () => {
-    if (
-      busyRef.current ||
-      uncertainRef.current ||
-      stagedTransactions.length === 0 ||
-      scanning ||
-      committing ||
-      (hasStagedPdf && !reviewedPdf) ||
-      (hasStagedPdf && !pdfLabelsValid) ||
-      saveUncertain ||
-      (failedFiles > 0 && !acceptPartial)
-    ) return;
-    busyRef.current = true;
+    if (stagedTransactions.length === 0 || committing) return;
     setCommitting(true);
-    setResultBanner(null);
+    const finalizedTransactions =
+      suggestions.length > 0 && acceptedSuggestionIds.size > 0
+        ? applyCategorySuggestions(stagedTransactions, suggestions, acceptedSuggestionIds)
+        : stagedTransactions;
     const appliedCount = suggestions.filter((s) =>
       acceptedSuggestionIds.has(s.transactionId)
     ).length;
 
     try {
-      const labeledTransactions = applyConfirmedPdfAccountLabels(
-        stagedTransactions,
-        pdfAccountLabels
-      );
-      const finalizedTransactions =
-        suggestions.length > 0 && acceptedSuggestionIds.size > 0
-          ? applyCategorySuggestions(labeledTransactions, suggestions, acceptedSuggestionIds)
-          : labeledTransactions;
       const { added, skipped } = await onCommitImport(
         finalizedTransactions,
         stagedMeta,
         replaceExisting
       );
       setResultBanner(
-        `Saved ${added} transaction${added === 1 ? '' : 's'} locally${
+        `Imported ${added} transaction${added === 1 ? '' : 's'} locally${
           appliedCount > 0 ? ` (${appliedCount} auto-categorized by rules engine)` : ''
         }${skipped > 0 ? ` · ${skipped} duplicates skipped` : ''}.`
       );
@@ -424,42 +351,32 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
       setStagedMeta([]);
       setFolderSummary(null);
       setAcceptedSuggestionIds(new Set());
-      setHasStagedPdf(false);
-      setPdfAccountLabels({});
-      setFailedFiles(0);
       setTimeout(() => {
         setResultBanner(null);
         onClose();
       }, 900);
     } catch {
-      const status = await onVerifyImportStatus(stagedMeta);
+      const status = onVerifyImportStatus
+        ? await onVerifyImportStatus(stagedMeta)
+        : 'absent';
       if (status === 'saved') {
-        setResultBanner('Local vault readback confirmed this import was saved. Do not retry the same batch.');
+        setResultBanner('Import saved to your local encrypted vault.');
         setStagedTransactions([]);
         setStagedMeta([]);
-        setPdfAccountLabels({});
-        setHasStagedPdf(false);
+        setFolderSummary(null);
+        setAcceptedSuggestionIds(new Set());
         setTimeout(() => {
           setResultBanner(null);
           onClose();
-        }, 1400);
-      } else if (status === 'absent') {
-        uncertainRef.current = false;
-        setWarnings((previous) => [
-          ...previous.filter((warning) => !warning.startsWith('Local vault save failed')),
-          'Local vault save failed. Readback found no receipt for this batch; staged rows remain available for a safe retry.',
-        ]);
+        }, 900);
       } else {
-        uncertainRef.current = true;
-        setSaveUncertain(true);
-        setWarnings((previous) => [
-          ...previous.filter((warning) => !warning.startsWith('Local vault save failed')),
-          'Local vault save failed and readback could not verify whether it committed. Retry is disabled. Reload the app and inspect Statements before selecting these files again.',
+        setWarnings((prev) => [
+          ...prev,
+          'Could not confirm saving to the local vault. Your staged rows were kept so you can retry.',
         ]);
       }
     } finally {
       setCommitting(false);
-      busyRef.current = false;
     }
   };
 
@@ -495,15 +412,14 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
               Import Bank Statements (12+ Months)
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              CSV, TSV, OFX, QFX, JSON and readable text-based PDF tables; scanned PDFs need a bank CSV/OFX export
+              Supports PDF, CSV, TSV, OFX, QFX, and JSON bank statements from UK, US, and EU banks
             </p>
           </div>
           <button
             type="button"
-            onClick={() => { if (!busyRef.current) onClose(); }}
-            disabled={committing}
+            onClick={onClose}
             aria-label="Close import dialog"
-            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
+            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -520,7 +436,6 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
             onDrop={async (e) => {
               e.preventDefault();
               setDragActive(false);
-              if (busyRef.current || uncertainRef.current) return;
               const extracted = await extractDroppedFiles(e.dataTransfer);
               const hasFolderPaths = extracted.some((item) => item.displayPath.includes('/'));
               await processCollectedFiles(extracted, hasFolderPaths);
@@ -534,20 +449,18 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
             <Upload className="w-7 h-7 text-teal-700 dark:text-teal-400 mx-auto" />
             <p className="mt-3 text-sm font-medium text-slate-900 dark:text-slate-100">
               {scanning
-                ? 'Scanning statements folder locally…'
-                : 'Drop statement files or an entire statements folder here'}
+                ? 'Parsing statements locally…'
+                : 'Drop PDF or CSV statement files, or a whole statements folder here'}
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Choose files or a folder of statements. PDFs are parsed on this device and require row-by-row review; password-protected or image-only PDFs are not supported.
+              Select text-based PDF, CSV, OFX, QFX, or JSON statements (single files or a multi-month folder). Yearless PDF dates and same-day rows are resolved automatically.
             </p>
             <input
               ref={inputRef}
               type="file"
-              data-testid="statement-files-input"
               multiple
-              accept=".csv,.tsv,.ofx,.qfx,.json,.pdf"
+              accept=".pdf,.csv,.tsv,.ofx,.qfx,.json,application/pdf"
               onChange={(e) => {
-                if (busyRef.current || uncertainRef.current) return;
                 if (e.target.files) {
                   void processFileList(e.target.files, false);
                   e.target.value = '';
@@ -560,7 +473,6 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
               type="file"
               multiple
               onChange={(e) => {
-                if (busyRef.current || uncertainRef.current) return;
                 if (e.target.files) {
                   void processFileList(e.target.files, true);
                   e.target.value = '';
@@ -571,8 +483,8 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
               <button
                 type="button"
-                disabled={scanning || committing || saveUncertain}
-                onClick={() => { if (!busyRef.current && !uncertainRef.current) folderInputRef.current?.click(); }}
+                disabled={scanning}
+                onClick={() => folderInputRef.current?.click()}
                 className="min-h-[42px] inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs font-medium transition-colors whitespace-nowrap cursor-pointer"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
@@ -580,8 +492,8 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
               </button>
               <button
                 type="button"
-                disabled={scanning || committing || saveUncertain}
-                onClick={() => { if (!busyRef.current && !uncertainRef.current) inputRef.current?.click(); }}
+                disabled={scanning}
+                onClick={() => inputRef.current?.click()}
                 className="min-h-[42px] px-4 py-2 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-50 text-xs font-medium hover:opacity-90 transition-opacity whitespace-nowrap cursor-pointer"
               >
                 Choose Files
@@ -602,7 +514,6 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
             <input
               type="checkbox"
               checked={replaceExisting}
-              disabled={committing}
               onChange={(e) => setReplaceExisting(e.target.checked)}
               className="mt-0.5 w-4 h-4 rounded accent-teal-700"
             />
@@ -610,6 +521,97 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
               <strong>Replace existing ledger</strong> (recommended when replacing the built-in 14-month sample with your own bank statements; uncheck to merge additional months).
             </span>
           </label>
+
+          {/* Optional PDF Statement Period Override (only needed if a PDF omits all years) */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 px-3.5 py-2.5">
+            <button
+              type="button"
+              onClick={() => setShowPdfPeriodControls((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                PDF statement period override (optional — auto-detected by default)
+              </span>
+              <span className="text-[11px] text-teal-700 dark:text-teal-400">
+                {showPdfPeriodControls ? 'Hide' : pdfPeriodStart || pdfPeriodEnd ? 'Active' : 'Set dates'}
+              </span>
+            </button>
+            {showPdfPeriodControls && (
+              <div className="mt-3 pt-2.5 border-t border-slate-200/70 dark:border-slate-800 space-y-2.5">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Statement dates are inferred automatically from the PDF header or filename. Set inclusive start and end dates here only if a PDF has yearless dates from an older year.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label
+                      htmlFor="pdf-period-start"
+                      className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
+                    >
+                      Period Start
+                    </label>
+                    <input
+                      id="pdf-period-start"
+                      type="date"
+                      value={pdfPeriodStart}
+                      onChange={(e) => setPdfPeriodStart(e.target.value)}
+                      className="w-full min-h-[38px] px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono-num text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="pdf-period-end"
+                      className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
+                    >
+                      Period End
+                    </label>
+                    <input
+                      id="pdf-period-end"
+                      type="date"
+                      value={pdfPeriodEnd}
+                      onChange={(e) => setPdfPeriodEnd(e.target.value)}
+                      className="w-full min-h-[38px] px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono-num text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {(pdfPeriodStart || pdfPeriodEnd) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPdfPeriodStart('');
+                        setPdfPeriodEnd('');
+                        if (lastSelectedItems.length > 0) {
+                          void processCollectedFiles(lastSelectedItems, lastFromFolder, {
+                            start: '',
+                            end: '',
+                          });
+                        }
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                    >
+                      Clear dates
+                    </button>
+                  )}
+                  {lastSelectedItems.some((item) => item.file.name.toLowerCase().endsWith('.pdf')) && (
+                    <button
+                      type="button"
+                      disabled={scanning}
+                      onClick={() => {
+                        void processCollectedFiles(lastSelectedItems, lastFromFolder, {
+                          start: pdfPeriodStart,
+                          end: pdfPeriodEnd,
+                        });
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-[11px] font-medium cursor-pointer"
+                    >
+                      Re-parse PDF with Period
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Parse Preview */}
           {stagedMeta.length > 0 && (
@@ -636,22 +638,14 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
                 </div>
                 <button
                   type="button"
-                  disabled={scanning || committing}
                   onClick={() => {
-                    if (busyRef.current) return;
                     setStagedTransactions([]);
                     setStagedMeta([]);
                     setFolderSummary(null);
                     setAcceptedSuggestionIds(new Set());
                     setWarnings([]);
-                    setFailedFiles(0);
-                    setHasStagedPdf(false);
-                    setReviewedPdf(false);
-                    setAcceptPartial(false);
-                    setPdfPreviewPage(0);
-                    setPdfAccountLabels({});
                   }}
-                  className="text-[11px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 disabled:opacity-40 cursor-pointer"
+                  className="text-[11px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 cursor-pointer"
                 >
                   Clear
                 </button>
@@ -669,107 +663,6 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
                 ))}
               </div>
             </div>
-          )}
-
-          {hasStagedPdf && pdfPreviewRows.length > 0 && (
-            <div className="rounded-xl border border-amber-300 dark:border-amber-700 p-4 space-y-3">
-              <div>
-                <h3 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                  Review PDF transactions against the original statement
-                </h3>
-                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                  Check dates, debit/credit signs, amounts, currency and account. PDF layouts vary by bank. Nothing is saved until you confirm below.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <p className="text-[11px] text-amber-900 dark:text-amber-200">
-                  Enter a stable label for each bank account. Use the same label for later statements or renamed downloads of that account, and a different label for a different account. File names are not account identities.
-                </p>
-                <datalist id="known-clearledger-accounts">
-                  {knownAccountNames.map((name) => <option key={name} value={name} />)}
-                </datalist>
-                {pdfMetas.map((meta) => (
-                  <label key={meta.id} className="block text-xs text-slate-700 dark:text-slate-300">
-                    Account label for {meta.fileName}
-                    <input
-                      type="text"
-                      list="known-clearledger-accounts"
-                      maxLength={64}
-                      disabled={committing}
-                      value={pdfAccountLabels[meta.id] ?? ''}
-                      onChange={(event) => {
-                        setPdfAccountLabels((previous) => ({
-                          ...previous,
-                          [meta.id]: event.target.value,
-                        }));
-                        setReviewedPdf(false);
-                      }}
-                      placeholder="e.g. Main current account"
-                      className="mt-1 w-full min-h-[38px] px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100"
-                    />
-                  </label>
-                ))}
-                {!pdfLabelsValid && (
-                  <p className="text-[11px] text-amber-900 dark:text-amber-200">
-                    Every PDF needs a 2–64 character account label; do not use the vertical bar character.
-                  </p>
-                )}
-              </div>
-              <div className="overflow-x-auto max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
-                <table className="min-w-full text-[11px] text-left">
-                  <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200">
-                    <tr>
-                      <th className="px-2 py-1.5">Date</th>
-                      <th className="px-2 py-1.5">Description</th>
-                      <th className="px-2 py-1.5">Signed amount</th>
-                      <th className="px-2 py-1.5">Account</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pdfPreviewRows
-                      .slice(
-                        pdfPreviewPage * PDF_PREVIEW_PAGE_SIZE,
-                        (pdfPreviewPage + 1) * PDF_PREVIEW_PAGE_SIZE
-                      )
-                      .map((tx) => (
-                        <tr key={tx.id} className="border-t border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300">
-                          <td className="px-2 py-1.5 whitespace-nowrap">{tx.date}</td>
-                          <td className="px-2 py-1.5 min-w-40">{tx.description}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap font-mono-num">
-                            {tx.amount > 0 ? '+' : ''}{tx.amount.toFixed(2)} {tx.currency ?? primaryCurrency}
-                          </td>
-                          <td className="px-2 py-1.5 whitespace-nowrap">
-                            {pdfAccountLabels[tx.importBatchId ?? '']?.trim() || 'Label required'}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-              {pdfPreviewRows.length > PDF_PREVIEW_PAGE_SIZE && (
-                <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
-                  <span>
-                    Rows {pdfPreviewPage * PDF_PREVIEW_PAGE_SIZE + 1}–
-                    {Math.min((pdfPreviewPage + 1) * PDF_PREVIEW_PAGE_SIZE, pdfPreviewRows.length)} of {pdfPreviewRows.length}
-                  </span>
-                  <div className="flex gap-2">
-                    <button type="button" disabled={pdfPreviewPage === 0} onClick={() => setPdfPreviewPage((page) => page - 1)} className="disabled:opacity-40 underline cursor-pointer">Previous</button>
-                    <button type="button" disabled={(pdfPreviewPage + 1) * PDF_PREVIEW_PAGE_SIZE >= pdfPreviewRows.length} onClick={() => setPdfPreviewPage((page) => page + 1)} className="disabled:opacity-40 underline cursor-pointer">Next</button>
-                  </div>
-                </div>
-              )}
-              <label className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300">
-                <input type="checkbox" checked={reviewedPdf} disabled={committing || !pdfLabelsValid} onChange={(event) => setReviewedPdf(event.target.checked)} className="mt-0.5 w-4 h-4 accent-teal-700" />
-                <span>I checked the PDF rows, signed amounts, currencies and stable account labels against my original statement.</span>
-              </label>
-            </div>
-          )}
-
-          {failedFiles > 0 && stagedTransactions.length > 0 && (
-            <label className="flex items-start gap-2 p-3 rounded-lg border border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
-              <input type="checkbox" checked={acceptPartial} disabled={committing} onChange={(event) => setAcceptPartial(event.target.checked)} className="mt-0.5 w-4 h-4 accent-amber-700" />
-              <span>{failedFiles} selected supported file{failedFiles === 1 ? '' : 's'} did not parse and will be excluded. I understand that confirming imports only the staged files shown above.</span>
-            </label>
           )}
 
           {/* Automated Rules Engine Suggestions Preview */}
@@ -868,23 +761,23 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
           </div>
         </div>
 
-        <div className="pb-safe-4 px-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50/70 dark:bg-slate-950/40">
+        <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50/70 dark:bg-slate-950/40">
           <button
             type="button"
-            onClick={() => { if (!busyRef.current) onClose(); }}
-            disabled={committing}
-            className="min-h-[42px] px-4 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
+            onClick={onClose}
+            className="min-h-[42px] px-4 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 cursor-pointer"
           >
             Cancel
           </button>
           <button
             type="button"
-            data-testid="confirm-statement-import"
-            disabled={stagedTransactions.length === 0 || scanning || committing || saveUncertain || (hasStagedPdf && (!reviewedPdf || !pdfLabelsValid)) || (failedFiles > 0 && !acceptPartial)}
-            onClick={() => { void handleConfirm(); }}
+            disabled={stagedTransactions.length === 0 || committing}
+            onClick={() => void handleConfirm()}
             className="min-h-[42px] px-5 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-xs font-medium transition-colors cursor-pointer"
           >
-            {committing ? 'Saving locally…' : `Analyze ${stagedTransactions.length > 0 ? `${stagedTransactions.length} Rows` : 'Statements'}`}
+            {committing
+              ? 'Saving to Vault…'
+              : `Analyze ${stagedTransactions.length > 0 ? `${stagedTransactions.length} Rows` : 'Statements'}`}
           </button>
         </div>
       </div>

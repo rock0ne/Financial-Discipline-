@@ -1,10 +1,10 @@
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { ParsedStatementResult } from './statementParser';
 import {
-  groupPdfPageText,
-  parsePdfStatementRows,
-  type PdfTextCell,
-  type PdfTextRow,
+  parsePdfStatementPages,
+  type PdfExtractedPage,
+  type PdfParseOptions,
+  type PdfTextSpan,
 } from './pdfStatementParser';
 
 const MAX_PDF_BYTES = 15 * 1024 * 1024;
@@ -18,7 +18,8 @@ function rejected(message: string): ParsedStatementResult {
 
 export async function parsePdfStatementFile(
   file: File,
-  displayPath: string
+  displayPath: string,
+  options: PdfParseOptions = {}
 ): Promise<ParsedStatementResult> {
   if (file.size === 0 || file.size > MAX_PDF_BYTES) {
     return rejected('PDF is empty or exceeds the 15 MiB local-import limit.');
@@ -39,18 +40,21 @@ export async function parsePdfStatementFile(
     disableAutoFetch: true,
     disableStream: true,
   });
+
   try {
     const documentProxy = await task.promise;
     if (documentProxy.numPages > MAX_PDF_PAGES) {
       return rejected('PDF exceeds the 100-page local-import limit.');
     }
-    const rows: PdfTextRow[] = [];
+    const pages: PdfExtractedPage[] = [];
     let cellCount = 0;
     let textLength = 0;
+
     for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber++) {
       const page = await documentProxy.getPage(pageNumber);
       const content = await page.getTextContent();
-      const cells: PdfTextCell[] = [];
+      const spans: PdfTextSpan[] = [];
+
       for (const item of content.items) {
         if (!('str' in item)) continue;
         const text = item.str.trim();
@@ -60,23 +64,33 @@ export async function parsePdfStatementFile(
         if (cellCount > MAX_TEXT_CELLS || textLength > MAX_TEXT_CHARACTERS) {
           return rejected('PDF text exceeds the local-import safety limit.');
         }
-        cells.push({
+        const transform = item.transform ?? [1, 0, 0, 10, 0, 0];
+        const height = Math.abs(Number(item.height || transform[3] || 10));
+        const width = Math.abs(Number(item.width || text.length * height * 0.5));
+        spans.push({
           text,
-          x: item.transform[4],
-          y: item.transform[5],
-          width: item.width,
+          x: Number(transform[4] ?? 0),
+          y: Number(transform[5] ?? 0),
+          width,
+          height,
         });
       }
-      rows.push(...groupPdfPageText(pageNumber, cells));
+
+      pages.push({ pageNumber, spans });
       page.cleanup();
     }
-    return parsePdfStatementRows(rows, displayPath);
+
+    return parsePdfStatementPages(pages, displayPath, options);
   } catch (error) {
     const name = error instanceof Error ? error.name : '';
     if (name === 'PasswordException') {
-      return rejected('Password-protected PDFs are not supported. Export CSV/OFX or an unprotected text PDF from your bank.');
+      return rejected(
+        'Password-protected PDFs are not supported. Export CSV/OFX or an unprotected text PDF from your bank.'
+      );
     }
-    return rejected('This PDF could not be read safely. It may be damaged, scanned, encrypted or use an unsupported layout.');
+    return rejected(
+      'This PDF could not be read safely. It may be damaged, scanned, encrypted or use an unsupported layout.'
+    );
   } finally {
     await task.destroy();
   }

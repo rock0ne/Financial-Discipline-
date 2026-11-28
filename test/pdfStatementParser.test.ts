@@ -1,150 +1,283 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  groupPdfPageText,
-  parsePdfStatementRows,
-  type PdfTextRow,
+  extractStatementDateContext,
+  groupPdfPagesIntoRows,
+  parseLeadingPdfDate,
+  parsePdfMoneyCell,
+  parsePdfStatementPages,
+  resolveYearlessDate,
+  type PdfExtractedPage,
+  type PdfTextSpan,
 } from '../src/utils/pdfStatementParser';
-import { buildDedupKey } from '../src/utils/statementParser';
-import { makeSyntheticStatementPdf } from './syntheticPdfFixture';
 
-function row(page: number, y: number, values: Array<[number, string]>): PdfTextRow {
-  return {
-    page,
+function makeRowSpans(
+  y: number,
+  cells: Array<{ x: number; text: string; width?: number }>
+): PdfTextSpan[] {
+  return cells.map((c) => ({
+    x: c.x,
     y,
-    cells: values.map(([x, text]) => ({ x, y, text, width: Math.max(15, text.length * 6) })),
-  };
+    text: c.text,
+    width: c.width ?? Math.max(c.text.length * 5, 18),
+    height: 10,
+  }));
 }
 
-const header = (page: number, y: number) =>
-  row(page, y, [
-    [40, 'Date'],
-    [120, 'Description'],
-    [350, 'Debit'],
-    [430, 'Credit'],
-    [510, 'Balance'],
-  ]);
+describe('pdfStatementParser (local UK/US/EU bank PDF statement engine)', () => {
+  it('parses flexible full and yearless PDF date formats and money cells accurately', () => {
+    assert.equal(parseLeadingPdfDate('02-OCT-26')?.isoDate, '2026-10-02');
+    assert.equal(parseLeadingPdfDate('2 Oct 2026')?.isoDate, '2026-10-02');
+    assert.equal(parseLeadingPdfDate('02/10/2026')?.isoDate, '2026-10-02');
+    assert.equal(parseLeadingPdfDate('2026-10-02')?.isoDate, '2026-10-02');
+    assert.deepEqual(parseLeadingPdfDate('02 Oct')?.yearless, { day: 2, month: 10 });
+    assert.deepEqual(parseLeadingPdfDate('29-SEP')?.yearless, { day: 29, month: 9 });
 
-describe('local PDF statement table parser', () => {
-  it('reads a real synthetic PDF text layer using PDF.js before applying the table parser', async () => {
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    const task = pdfjs.getDocument({ data: makeSyntheticStatementPdf(), useSystemFonts: true });
-    try {
-      const pdf = await task.promise;
-      const page = await pdf.getPage(1);
-      const content = await page.getTextContent();
-      const cells = content.items
-        .filter((item): item is typeof item & { str: string; transform: number[]; width: number } => 'str' in item && 'transform' in item && 'width' in item)
-        .filter((item) => item.str.trim())
-        .map((item) => ({
-          text: item.str.trim(),
-          x: item.transform[4],
-          y: item.transform[5],
-          width: item.width,
-        }));
-      const rows = groupPdfPageText(1, cells);
-      const result = parsePdfStatementRows(rows, 'synthetic-statement.pdf');
-      assert.deepEqual(result.transactions.map((tx) => tx.amount), [-14.5, 2500]);
-      assert.equal(result.transactions[0].description, 'Trainline ticket');
-      assert.equal(result.transactions[1].description, 'Salary payroll');
-    } finally {
-      await task.destroy();
-    }
+    assert.deepEqual(parsePdfMoneyCell('£42.50'), {
+      absValue: 42.5,
+      explicitSign: null,
+      currency: 'GBP',
+      isOverdrawn: false,
+    });
+    assert.deepEqual(parsePdfMoneyCell('1,234.56 DR'), {
+      absValue: 1234.56,
+      explicitSign: -1,
+      currency: undefined,
+      isOverdrawn: true,
+    });
+    // Sort codes and plain integer references must never parse as money
+    assert.equal(parsePdfMoneyCell('20-45-12'), null);
+    assert.equal(parsePdfMoneyCell('12345678'), null);
   });
 
-  it('extracts distinct signed transactions, ignores running balances and joins a wrapped description', () => {
-    const result = parsePdfStatementRows(
-      [
-        row(1, 740, [[40, 'Account statement GBP']]),
-        header(1, 700),
-        row(1, 680, [[40, '03/11/2026'], [120, 'Trainline ticket'], [350, '£14.50'], [510, '£985.50']]),
-        row(1, 664, [[120, 'London to Reading']]),
-        row(1, 640, [[40, '04/11/2026'], [120, 'Salary payroll'], [430, '£2,500.00'], [510, '£3,485.50']]),
-        row(1, 620, [[40, '04/11/2026'], [120, 'Closing Balance'], [510, '£3,485.50']]),
-      ],
-      'current-account.pdf'
+  it('extracts transactions from UK bank PDF with filename date, yearless rows, blank same-day dates, multi-line descriptions, and running balances', () => {
+    const pages: PdfExtractedPage[] = [
+      {
+        pageNumber: 1,
+        spans: [
+          // Top account summary box (must not be parsed as transactions)
+          ...makeRowSpans(780, [{ x: 40, text: 'Your Account Summary' }]),
+          ...makeRowSpans(760, [
+            { x: 40, text: 'Sort Code 20-45-12' },
+            { x: 220, text: 'Account Number 12345678' },
+          ]),
+          ...makeRowSpans(740, [
+            { x: 40, text: 'Balance on 03 Sep' },
+            { x: 480, text: '£1,500.00' },
+          ]),
+          // Table Header
+          ...makeRowSpans(700, [
+            { x: 40, text: 'Date', width: 45 },
+            { x: 100, text: 'Type', width: 30 },
+            { x: 145, text: 'Description', width: 140 },
+            { x: 350, text: 'Paid Out', width: 55 },
+            { x: 425, text: 'Paid In', width: 55 },
+            { x: 500, text: 'Balance', width: 60 },
+          ]),
+          // Brought forward balance seeds running-balance verification
+          ...makeRowSpans(680, [
+            { x: 145, text: 'BALANCE BROUGHT FORWARD' },
+            { x: 505, text: '1,500.00', width: 55 },
+          ]),
+          // Tx 1: Yearless date + Paid Out
+          ...makeRowSpans(655, [
+            { x: 40, text: '29 Sep' },
+            { x: 100, text: 'DEB' },
+            { x: 145, text: 'TESCO STORES 2410' },
+            { x: 365, text: '64.20', width: 40 },
+            { x: 505, text: '1,435.80', width: 55 },
+          ]),
+          // Continuation line (no date, no amount) attaches cleanly to Tx 1
+          ...makeRowSpans(642, [{ x: 145, text: 'CARD PAYMENT LONDON GB' }]),
+          // Tx 2: Blank date on same day (inherits 2026-09-29!) + Paid Out
+          ...makeRowSpans(620, [
+            { x: 100, text: 'DD' },
+            { x: 145, text: 'OCTOPUS ENERGY' },
+            { x: 365, text: '112.50', width: 40 },
+            { x: 505, text: '1,323.30', width: 55 },
+          ]),
+          // Tx 3: Salary Paid In (positive verified by both Paid In column AND balance delta!)
+          ...makeRowSpans(595, [
+            { x: 40, text: '01 Oct' },
+            { x: 100, text: 'BGC' },
+            { x: 145, text: 'ACME LTD PAYROLL' },
+            { x: 430, text: '2,800.00', width: 50 },
+            { x: 505, text: '4,123.30', width: 55 },
+          ]),
+          // Tx 4: Two-line entry where Date + Description appear on line 1, amount + balance on line 2
+          ...makeRowSpans(570, [
+            { x: 40, text: '02 Oct' },
+            { x: 100, text: 'DEB' },
+            { x: 145, text: 'PRET A MANGER' },
+          ]),
+          ...makeRowSpans(557, [
+            { x: 145, text: 'CONTACTLESS VICTORIA' },
+            { x: 365, text: '6.85', width: 40 },
+            { x: 505, text: '4,116.45', width: 55 },
+          ]),
+          // Carried forward & footer boilerplate (must be skipped cleanly)
+          ...makeRowSpans(520, [
+            { x: 145, text: 'BALANCE CARRIED FORWARD' },
+            { x: 505, text: '4,116.45', width: 55 },
+          ]),
+          ...makeRowSpans(490, [{ x: 40, text: 'Page 1 of 2 · Authorised by the Prudential Regulation Authority' }]),
+        ],
+      },
+    ];
+
+    const result = parsePdfStatementPages(
+      pages,
+      'Statement 02-OCT-26 AC 12345678 001.pdf',
+      { defaultCurrency: 'GBP' }
     );
-    assert.equal(result.transactions.length, 2);
-    assert.deepEqual(result.transactions.map((tx) => [tx.date, tx.amount, tx.currency]), [
-      ['2026-11-03', -14.5, 'GBP'],
-      ['2026-11-04', 2500, 'GBP'],
-    ]);
-    assert.equal(result.transactions[0].description, 'Trainline ticket London to Reading');
-    assert.match(result.warnings.join(' '), /Review every transaction/);
+
+    assert.equal(result.warnings.length, 0);
+    assert.equal(result.transactions.length, 4);
+
+    assert.equal(result.transactions[0].date, '2026-09-29');
+    assert.equal(result.transactions[0].amount, -64.2);
+    assert.equal(result.transactions[0].merchant, 'Tesco');
+    assert.ok(result.transactions[0].description.includes('CARD PAYMENT LONDON GB'));
+
+    // Blank same-day row safely inherited 2026-09-29
+    assert.equal(result.transactions[1].date, '2026-09-29');
+    assert.equal(result.transactions[1].amount, -112.5);
+    assert.equal(result.transactions[1].merchant, 'Octopus Energy');
+
+    // Paid In credit row resolved as positive income
+    assert.equal(result.transactions[2].date, '2026-10-01');
+    assert.equal(result.transactions[2].amount, 2800);
+    assert.equal(result.transactions[2].spendingClass, 'income');
+
+    // Two-line transaction merged cleanly
+    assert.equal(result.transactions[3].date, '2026-10-02');
+    assert.equal(result.transactions[3].amount, -6.85);
+    assert.equal(result.transactions[3].merchant, 'Pret A Manger');
+    assert.ok(result.transactions[3].description.includes('CONTACTLESS VICTORIA'));
   });
 
-  it('repeated page headers do not become transactions', () => {
-    const result = parsePdfStatementRows(
-      [
-        row(1, 740, [[40, 'GBP']]),
-        header(1, 700),
-        row(1, 680, [[40, '03/11/2026'], [120, 'Tesco'], [350, '£23.40']]),
-        header(2, 700),
-        row(2, 680, [[40, '04/11/2026'], [120, 'Waitrose'], [350, '£12.10']]),
-      ],
-      'statement.pdf'
-    );
-    assert.equal(result.transactions.length, 2);
+  it('resolves December-to-January yearless statement periods across year rollover accurately', () => {
+    const pages: PdfExtractedPage[] = [
+      {
+        pageNumber: 1,
+        spans: [
+          ...makeRowSpans(760, [{ x: 40, text: 'Statement Period: 16 Dec 2025 to 15 Jan 2026' }]),
+          ...makeRowSpans(720, [
+            { x: 40, text: 'Date' },
+            { x: 120, text: 'Details' },
+            { x: 380, text: 'Amount' },
+          ]),
+          ...makeRowSpans(690, [
+            { x: 40, text: '28 Dec' },
+            { x: 120, text: 'WAITROSE GROCERIES' },
+            { x: 380, text: '-£54.10' },
+          ]),
+          ...makeRowSpans(665, [
+            { x: 40, text: '04 Jan' },
+            { x: 120, text: 'NETFLIX.COM' },
+            { x: 380, text: '-£10.99' },
+          ]),
+        ],
+      },
+    ];
+
+    const rows = groupPdfPagesIntoRows(pages);
+    const ctx = extractStatementDateContext(rows, 'dec_jan_statement.pdf');
+    assert.equal(ctx.periodStart, '2025-12-16');
+    assert.equal(ctx.periodEnd, '2026-01-15');
+    assert.equal(resolveYearlessDate(28, 12, ctx), '2025-12-28');
+    assert.equal(resolveYearlessDate(4, 1, ctx), '2026-01-04');
+
+    const parsed = parsePdfStatementPages(pages, 'dec_jan_statement.pdf');
+    assert.equal(parsed.transactions.length, 2);
+    assert.equal(parsed.transactions[0].date, '2025-12-28');
+    assert.equal(parsed.transactions[1].date, '2026-01-04');
   });
 
-  it('rejects the entire PDF if a transaction-like row has an invalid date or ambiguous amount', () => {
-    const invalidDate = parsePdfStatementRows(
-      [row(1, 740, [[40, 'GBP']]), header(1, 700), row(1, 680, [[40, '31/02/2026'], [120, 'Tesco'], [350, '£23.40']])],
-      'bad.pdf'
-    );
-    assert.equal(invalidDate.transactions.length, 0);
-    assert.match(invalidDate.warnings.join(' '), /could not be interpreted safely/);
+  it('supports manual period override and warns cleanly on scanned/image-only PDFs', () => {
+    const emptyPdf = parsePdfStatementPages([{ pageNumber: 1, spans: [] }], 'scanned_statement.pdf');
+    assert.equal(emptyPdf.transactions.length, 0);
+    assert.ok(emptyPdf.warnings[0].toLowerCase().includes('scanned'));
 
-    const bothDirections = parsePdfStatementRows(
-      [row(1, 740, [[40, 'GBP']]), header(1, 700), row(1, 680, [[40, '03/11/2026'], [120, 'Unknown'], [350, '£23.40'], [430, '£23.40']])],
-      'bad.pdf'
-    );
-    assert.equal(bothDirections.transactions.length, 0);
+    const yearlessPages: PdfExtractedPage[] = [
+      {
+        pageNumber: 1,
+        spans: [
+          ...makeRowSpans(700, [
+            { x: 40, text: '14 Mar' },
+            { x: 120, text: 'TRAINLINE RAIL' },
+            { x: 380, text: '-£38.40' },
+          ]),
+        ],
+      },
+    ];
+
+    const withManualPeriod = parsePdfStatementPages(yearlessPages, 'march.pdf', {
+      statementPeriodStart: '2024-03-01',
+      statementPeriodEnd: '2024-03-31',
+    });
+    assert.equal(withManualPeriod.transactions.length, 1);
+    assert.equal(withManualPeriod.transactions[0].date, '2024-03-14');
+    assert.equal(withManualPeriod.transactions[0].amount, -38.4);
   });
 
-  it('rejects a balance-only table and unsupported/scanned content', () => {
-    const result = parsePdfStatementRows(
-      [row(1, 700, [[40, 'Date'], [120, 'Description'], [510, 'Balance']])],
-      'scan.pdf'
-    );
-    assert.equal(result.transactions.length, 0);
-    assert.match(result.warnings.join(' '), /scanned|unsupported layout/i);
-  });
+  it('handles two-line wrapped UK bank headers, spaceless dates (02OCT), Paid-In-first ISA tables, and skips utility bills in mixed folders', () => {
+    const wrappedPages: PdfExtractedPage[] = [
+      {
+        pageNumber: 1,
+        spans: [
+          // Two-line wrapped header: "Paid / in (£)" BEFORE "Paid / out (£)" (common on UK Cash ISA & bank PDFs)
+          ...makeRowSpans(712, [
+            { x: 40, text: 'Date', width: 45 },
+            { x: 110, text: 'Payment type', width: 85 },
+            { x: 340, text: 'Paid', width: 45 },
+            { x: 415, text: 'Paid', width: 45 },
+            { x: 495, text: 'Balance', width: 55 },
+          ]),
+          ...makeRowSpans(700, [
+            { x: 110, text: 'and details', width: 85 },
+            { x: 340, text: 'in (£)', width: 45 },
+            { x: 415, text: 'out (£)', width: 45 },
+            { x: 495, text: '(£)', width: 55 },
+          ]),
+          ...makeRowSpans(675, [
+            { x: 40, text: '03JUL' },
+            { x: 110, text: 'ISA DEPOSIT' },
+            { x: 345, text: '500.00', width: 40 },
+            { x: 420, text: '-', width: 10 },
+            { x: 500, text: '2,500.00', width: 50 },
+          ]),
+          ...makeRowSpans(650, [
+            { x: 40, text: 'Mon 04 Jul' },
+            { x: 110, text: 'WITHDRAWAL TO CURRENT' },
+            { x: 420, text: '100.00', width: 40 },
+            { x: 500, text: '2,400.00', width: 50 },
+          ]),
+        ],
+      },
+    ];
 
-  it('requires an explicit debit/credit sign for a single Amount column', () => {
-    const amountHeader = row(1, 700, [[40, 'Date'], [120, 'Description'], [350, 'Amount'], [510, 'Balance']]);
-    const ambiguous = parsePdfStatementRows(
-      [row(1, 740, [[40, 'GBP']]), amountHeader, row(1, 680, [[40, '03/11/2026'], [120, 'Tesco'], [350, '£23.40'], [510, '£976.60']])],
-      'ambiguous.pdf'
-    );
-    assert.equal(ambiguous.transactions.length, 0);
-    const signed = parsePdfStatementRows(
-      [row(1, 740, [[40, 'GBP']]), amountHeader, row(1, 680, [[40, '03/11/2026'], [120, 'Tesco'], [350, '-£23.40'], [510, '£976.60']])],
-      'signed.pdf'
-    );
-    assert.equal(signed.transactions[0].amount, -23.4);
-  });
+    const isaParsed = parsePdfStatementPages(wrappedPages, 'Statement 03-JUL-26 CashISA.pdf', {
+      defaultCurrency: 'GBP',
+    });
+    assert.equal(isaParsed.transactions.length, 2);
+    assert.equal(isaParsed.transactions[0].date, '2026-07-03');
+    assert.equal(isaParsed.transactions[0].amount, 500);
+    assert.equal(isaParsed.transactions[1].date, '2026-07-04');
+    assert.equal(isaParsed.transactions[1].amount, -100);
 
-  it('refuses conflicting direction and mixed currencies in one transaction row', () => {
-    const amountWithType = row(1, 700, [[40, 'Date'], [120, 'Description'], [350, 'Amount'], [430, 'Type']]);
-    const conflict = parsePdfStatementRows(
-      [row(1, 740, [[40, 'GBP']]), amountWithType, row(1, 680, [[40, '03/11/2026'], [120, 'Tesco'], [350, '-£23.40'], [430, 'Credit']])],
-      'conflict.pdf'
-    );
-    assert.equal(conflict.transactions.length, 0);
-    const mixed = parsePdfStatementRows(
-      [header(1, 700), row(1, 680, [[40, '03/11/2026'], [120, 'Tesco'], [350, '£23.40'], [430, '$23.40']])],
-      'mixed.pdf'
-    );
-    assert.equal(mixed.transactions.length, 0);
-  });
-
-  it('keeps identical transactions in different accounts distinct for deduplication', () => {
-    const rows = [row(1, 740, [[40, 'GBP']]), header(1, 700), row(1, 680, [[40, '03/11/2026'], [120, 'Tesco'], [350, '£23.40']])];
-    const first = parsePdfStatementRows(rows, 'account-a.pdf').transactions[0];
-    const second = parsePdfStatementRows(rows, 'account-b.pdf').transactions[0];
-    const reimport = { ...first, id: 'reimport' };
-    assert.notEqual(buildDedupKey(first), buildDedupKey(second));
-    assert.equal(buildDedupKey(first), buildDedupKey(reimport));
+    // Non-statement utility bill PDF inside the same folder is skipped cleanly
+    const billPages: PdfExtractedPage[] = [
+      {
+        pageNumber: 1,
+        spans: [
+          ...makeRowSpans(760, [{ x: 40, text: 'Octopus Energy - Your Electricity Supply Statement' }]),
+          ...makeRowSpans(740, [{ x: 40, text: '02 Oct 2026  Meter reading 1420 kWh  £85.40' }]),
+        ],
+      },
+    ];
+    const billParsed = parsePdfStatementPages(billPages, 'fixtures/fictional-bill.pdf');
+    assert.equal(billParsed.transactions.length, 0);
+    assert.ok(billParsed.warnings[0].toLowerCase().includes('skipped'));
   });
 });

@@ -307,9 +307,16 @@ export function matchesLedgerSearch(
 
   const customTags = tx.tags ?? [];
   if (parsed.tagTerms.length > 0) {
-    const lowerTags = customTags.map((t) => t.toLowerCase());
+    const searchableTags = [
+      ...customTags.map((t) => t.toLowerCase()),
+      ...txSmartTags.flatMap((t) => [
+        t.label.toLowerCase(),
+        t.tag.toLowerCase().replace(/_/g, ' '),
+        t.tag.toLowerCase(),
+      ]),
+    ];
     for (const requiredTag of parsed.tagTerms) {
-      if (!lowerTags.some((t) => t.includes(requiredTag))) return false;
+      if (!searchableTags.some((t) => t.includes(requiredTag))) return false;
     }
   }
 

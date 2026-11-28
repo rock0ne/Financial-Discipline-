@@ -133,11 +133,36 @@ describe('ledgerFilters & custom transaction tagging', () => {
     assert.deepEqual(badges, ['Dates: 2026-10-01 → 2026-10-31', 'Amount ≥ £40', '#work']);
   });
 
-  it('includes CustomTags column in exported CSV ledger', () => {
+  it('includes CustomTags column in exported CSV ledger and exports filtered subsets cleanly', () => {
     const csv = exportTransactionsToCsv(SAMPLE_TXS, 'GBP');
     assert.ok(csv.includes(',SmartTags,CustomTags,Account,'));
     assert.ok(csv.includes('"Work; Reimbursable"'));
     assert.ok(csv.includes('"Shared; Weekly Shop"'));
+
+    // Filter by tag and export only filtered transactions
+    const workQuery = parseLedgerSearchQuery('#work');
+    const filteredWork = SAMPLE_TXS.filter((tx) => matchesLedgerSearch(tx, workQuery, 'GBP'));
+    assert.equal(filteredWork.length, 2);
+    const filteredCsv = exportTransactionsToCsv(filteredWork, 'GBP');
+    assert.ok(filteredCsv.includes('Trainline'));
+    assert.ok(filteredCsv.includes('Pret A Manger'));
+    assert.ok(!filteredCsv.includes('Waitrose'));
+    assert.ok(!filteredCsv.includes('British Airways'));
+
+    // Also matches smart tags via #tag syntax
+    const smartTagQuery = parseLedgerSearchQuery('#tax');
+    assert.equal(
+      matchesLedgerSearch(SAMPLE_TXS[1], smartTagQuery, 'GBP', undefined, [
+        {
+          tag: 'tax_deductible',
+          label: 'Tax Deductible',
+          reason: 'Business rail travel',
+          matchedPattern: 'trainline',
+        },
+      ]),
+      true
+    );
+    assert.equal(matchesLedgerSearch(SAMPLE_TXS[0], smartTagQuery, 'GBP', undefined, []), false);
   });
 
   it('batch updates categories and tags across multiple selected transactions cleanly', () => {
