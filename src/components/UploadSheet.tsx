@@ -21,6 +21,7 @@ import {
 } from '../types/finance';
 import { exportTransactionsToCsv, parseStatementContent } from '../utils/statementParser';
 import { parsePdfStatementFile } from '../utils/pdfStatementReader';
+import { pickNativeStatementFolder } from '../utils/nativeStatementFolder';
 import { generateSample14MonthData } from '../utils/sampleData';
 import {
   applyCategorySuggestions,
@@ -177,13 +178,14 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Set webkitdirectory / directory attributes imperatively for cross-browser folder selection
+  // Browser/Windows folder selection; Android uses the native read-only system picker.
   useEffect(() => {
+    if (isNativeAndroid) return;
     const el = folderInputRef.current;
     if (!el) return;
     el.setAttribute('webkitdirectory', '');
     el.setAttribute('directory', '');
-  }, [open]);
+  }, [open, isNativeAndroid]);
 
   const suggestions = useMemo(() => {
     if (stagedTransactions.length === 0) return [];
@@ -316,6 +318,39 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
         (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
     }));
     await processCollectedFiles(items, fromFolder);
+  };
+
+  const chooseStatementFolder = async () => {
+    if (!isNativeAndroid) {
+      folderInputRef.current?.click();
+      return;
+    }
+    setScanning(true);
+    try {
+      const selection = await pickNativeStatementFolder();
+      if (selection.status === 'cancelled') return;
+      if (selection.items.length === 0) {
+        setWarnings(['No supported statement files were found in the selected folder.']);
+        return;
+      }
+      await processCollectedFiles(selection.items, true);
+      if (selection.ignoredCount > 0) {
+        setWarnings((prior) => [
+          ...prior,
+          `${selection.ignoredCount} non-statement file${selection.ignoredCount === 1 ? '' : 's'} ignored.`,
+        ]);
+      }
+      if (selection.releaseUncertain) {
+        setWarnings((prior) => [
+          ...prior,
+          'Android could not confirm releasing the temporary folder grant. Close the app after import to end access.',
+        ]);
+      }
+    } catch {
+      setWarnings(['The selected folder could not be read safely. Try a smaller folder or choose files individually.']);
+    } finally {
+      setScanning(false);
+    }
   };
 
   const toggleSuggestion = (txId: string) => {
@@ -486,7 +521,7 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
               <button
                 type="button"
                 disabled={scanning}
-                onClick={() => folderInputRef.current?.click()}
+                onClick={() => void chooseStatementFolder()}
                 className="min-h-[42px] inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs font-medium transition-colors whitespace-nowrap cursor-pointer"
               >
                 <FolderOpen className="w-3.5 h-3.5" />

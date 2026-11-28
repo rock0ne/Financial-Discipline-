@@ -1,0 +1,1 @@
+Synthetic fixture only. This file is not a bank statement and must be ignored.
