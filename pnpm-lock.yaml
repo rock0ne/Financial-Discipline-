@@ -17,6 +17,9 @@ importers:
       '@capacitor/core':
         specifier: 8.6.3
         version: 8.6.3
+      '@capacitor/local-notifications':
+        specifier: 8.3.1
+        version: 8.3.1(@capacitor/core@8.6.3)
       '@fontsource-variable/dm-sans':
         specifier: ^5.3.0
         version: 5.3.0
@@ -638,6 +641,11 @@ packages:
 
   '@capacitor/core@8.6.3':
     resolution: {integrity: sha512-WJ/DM2OTriEED5sI4jUyJU0NL3QJ/YenS2+SepW/nghMA5ixFJhm8NqGWdqDYYg+eRtJkjD8PcXtIxy4zTP0PA==}
+
+  '@capacitor/local-notifications@8.3.1':
+    resolution: {integrity: sha512-F7zu/+p/mIR958YP4axOkeI5hBKRaXDyYjbNPrAil2wWfd7OxScPSTvP9t85NpQ0eULVRu0/sntoxOg6ck477A==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@electron-internal/extract-zip@1.0.10':
     resolution: {integrity: sha512-3ZpfrVbqRKZ1/K0BjUfziapy3aZQzDeJX70SbsO8tc+gGlzJYnFAgZGE8LtxMV19RsoF8+Uwvd04FtIiMD4KyA==}
@@ -5164,6 +5172,10 @@ snapshots:
   '@capacitor/core@8.6.3':
     dependencies:
       tslib: 2.9.1
+
+  '@capacitor/local-notifications@8.3.1(@capacitor/core@8.6.3)':
+    dependencies:
+      '@capacitor/core': 8.6.3
 
   '@electron-internal/extract-zip@1.0.10': {}
 
