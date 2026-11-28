@@ -6,7 +6,7 @@ import {
   Search,
 } from 'lucide-react';
 
-type FaqCategory = 'all' | 'ai_hygiene' | 'privacy' | 'statements' | 'sharing';
+type FaqCategory = 'getting_started' | 'all' | 'ai_hygiene' | 'privacy' | 'statements' | 'sharing';
 
 interface FaqItem {
   id: string;
@@ -15,10 +15,80 @@ interface FaqItem {
   question: string;
   answer: string;
   actionLabel?: string;
-  actionTab?: 'ai' | 'vault' | 'reports' | 'ledger' | 'family' | 'overview';
+  actionTab?: 'start' | 'ai' | 'vault' | 'reports' | 'ledger' | 'family' | 'overview';
 }
 
 const FAQ_ITEMS: FaqItem[] = [
+  {
+    id: 'what-is-clearledger',
+    category: 'getting_started',
+    categoryLabel: 'New here',
+    question: 'What does Clearledger do?',
+    answer:
+      'It helps you read the bank statement files you choose. It groups spending, shows regular bills, and offers ideas to review. It cannot see your bank account by itself, move money, cancel a payment, or make a decision for you.',
+    actionLabel: 'Go to Start Here',
+    actionTab: 'start',
+  },
+  {
+    id: 'practice-numbers',
+    category: 'getting_started',
+    categoryLabel: 'New here',
+    question: 'Are the numbers I see at first my own money?',
+    answer:
+      'No. The starting numbers are made-up examples so you can explore safely. When you import your first real statement, Clearledger replaces that practice ledger instead of mixing it with your money. Check the import summary before saving.',
+    actionLabel: 'Go to Start Here',
+    actionTab: 'start',
+  },
+  {
+    id: 'first-statement',
+    category: 'getting_started',
+    categoryLabel: 'New here',
+    question: 'How do I start with my own statement?',
+    answer:
+      'Tap Import, choose a supported statement file or folder, and check the rows and dates shown. When you are happy with the review, tap Analyze to save the recognized transactions on this device. If Clearledger cannot read a PDF safely, use a CSV or OFX export from your bank instead. Never guess that missing rows were imported.',
+    actionLabel: 'Open Statements',
+    actionTab: 'ledger',
+  },
+  {
+    id: 'numbers-look-wrong',
+    category: 'getting_started',
+    categoryLabel: 'New here',
+    question: 'What if a number or date looks wrong?',
+    answer:
+      'Pause before acting on it. Compare the result with your original statement, check which dates and files you selected, and look for missing or repeated rows. You can review the Statements page and reimport after backing up anything you need to keep. Clearledger’s estimates are only as good as the files it can read.',
+    actionLabel: 'Review Statements',
+    actionTab: 'ledger',
+  },
+  {
+    id: 'do-i-need-ai',
+    category: 'getting_started',
+    categoryLabel: 'New here',
+    question: 'Do I need AI to use the app?',
+    answer:
+      'No. Imports, the Overview, spending ideas, alerts and reports work without AI. The current packaged Windows and Android preview does not connect to an AI provider or include an on-device AI model.',
+    actionLabel: 'Open Overview',
+    actionTab: 'overview',
+  },
+  {
+    id: 'where-is-my-data',
+    category: 'getting_started',
+    categoryLabel: 'New here',
+    question: 'Where does my information go, and how do I keep it?',
+    answer:
+      'Your imported transactions are saved in this app on this device, not sent to a bank or cloud account. They can be lost if app data is cleared or the app is uninstalled. For a protected backup, set a Vault Passphrase and export an encrypted vault copy; keep the passphrase somewhere safe.',
+    actionLabel: 'Open Vault & Settings',
+    actionTab: 'vault',
+  },
+  {
+    id: 'what-do-alerts-mean',
+    category: 'getting_started',
+    categoryLabel: 'New here',
+    question: 'Will it warn me when I spend money?',
+    answer:
+      'It does not watch your live bank account. Spending alerts use the statements already imported and are checked while the app is open. You can also set a date reminder and allow generic device notifications. Alerts are off until you choose to enable them.',
+    actionLabel: 'Open Vault & Settings',
+    actionTab: 'vault',
+  },
   {
     id: 'byok-setup',
     category: 'ai_hygiene',
@@ -65,7 +135,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'Privacy & Encryption',
     question: 'Can I use Clearledger completely offline without AI?',
     answer:
-      'Yes. Statement imports, 12-month D3 spending trends, Essential vs. Non-Essential breakdowns, custom monthly spending caps, projected over-cap alerts, recurring subscription audits, Cash ISA / LISA compounding math, CSV exports, and jsPDF printable reports all run 100% locally with zero network requests.',
+      'Yes. You can import statements, explore the Overview, review possible savings and make reports without AI. The packaged Windows and Android preview does not connect to an AI provider.',
     actionLabel: 'Go to Overview',
     actionTab: 'overview',
   },
@@ -75,7 +145,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'Statements & Reports',
     question: 'Which bank statement file formats can I upload, and how do I search them?',
     answer:
-      'You can drag and drop 12 or more months of CSV, OFX, QFX, or JSON bank statements (Monzo, Starling, Barclays, HSBC, Lloyds, NatWest, Chase, Revolut, and standard CSV exports). Duplicates are skipped automatically. In the Statements tab, you can filter by description or merchant, minimum/maximum amount range, exact date range, or spending class, and export filtered or full CSV files anytime.',
+      'You can choose PDF, CSV, TSV, OFX, QFX or JSON statement files. A readable text-based PDF may work; scanned or unusual PDFs may not. Check the review before tapping Analyze and use a bank CSV or OFX export if a PDF fails. In Statements you can search and filter saved transactions. Always compare results with the original statement.',
     actionLabel: 'Open Statements Ledger',
     actionTab: 'ledger',
   },
@@ -95,7 +165,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'Statements & Reports',
     question: 'How do projected monthly spending-cap alerts work?',
     answer:
-      'A lightweight local background check compares your spending so far in the latest statement month against elapsed days in the month to estimate your month-end total for every category with a custom cap. If any category is on pace to exceed its monthly cap, a dismissible banner appears at the top of the workspace so you can adjust before month-end.',
+      'While the app is open, Clearledger uses your imported statement rows and the days left in the month to estimate whether a category may go over a cap you set. This is not a live bank alert; new spending is not known until you import another statement. Check the source rows before relying on an estimate.',
     actionLabel: 'Review Category Caps',
     actionTab: 'overview',
   },
@@ -103,9 +173,9 @@ const FAQ_ITEMS: FaqItem[] = [
     id: 'family-share-crypto',
     category: 'sharing',
     categoryLabel: 'Family Sharing',
-    question: 'How does Family Share guarantee only another Clearledger user can decrypt my file?',
+    question: 'How is a Family Share file protected?',
     answer:
-      'Each Clearledger installation generates a non-extractable ECDH P-256 device keypair inside IndexedDB. When you share a .clearledger-share.json file, you paste your family member’s public Share ID (plus an optional household passphrase). Clearledger derives a shared secret via ECDH + HKDF-SHA256 and encrypts the file with AES-256-GCM bound exclusively to their Clearledger app instance—anyone else inspecting the file sees only random ciphertext.',
+      'Clearledger encrypts the shared file for the public Share ID you enter. Check that ID with your family member through a separate trusted channel before sending: if you use the wrong ID, the file may go to the wrong recipient or be unreadable. The recipient needs the matching private key in their Clearledger installation to decrypt it. Keep the shared file and any optional passphrase private.',
     actionLabel: 'Open Family Share',
     actionTab: 'family',
   },
@@ -115,6 +185,7 @@ interface FaqViewProps {
   onNavigate: (
     tab:
       | 'overview'
+      | 'start'
       | 'subscriptions'
       | 'cuts'
       | 'wealth'
@@ -131,17 +202,15 @@ interface FaqViewProps {
 
 export const FaqView: React.FC<FaqViewProps> = ({ onNavigate }) => {
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState<FaqCategory>('all');
+  const [category, setCategory] = useState<FaqCategory>('getting_started');
   const [openIds, setOpenIds] = useState<Record<string, boolean>>({
-    'byok-setup': true,
-    'timed-key-hygiene': true,
-    'zero-pii-ai': false,
+    'what-is-clearledger': true,
   });
 
   const filteredFaqs = useMemo(() => {
     const q = search.trim().toLowerCase();
     return FAQ_ITEMS.filter((item) => {
-      if (category !== 'all' && item.category !== category) return false;
+      if (!q && category !== 'all' && item.category !== category) return false;
       if (q) {
         const hay = `${item.question} ${item.answer} ${item.categoryLabel}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -158,15 +227,11 @@ export const FaqView: React.FC<FaqViewProps> = ({ onNavigate }) => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          Frequently Asked Questions &amp; Setup Guide
+          Help, in plain English
         </h1>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500 dark:text-slate-400">
-          <span>AI API key hygiene (Gemini, Claude, ChatGPT)</span>
-          <span aria-hidden="true">·</span>
-          <span>Local AES-256-GCM encryption</span>
-          <span aria-hidden="true">·</span>
-          <span>PDF reports &amp; encrypted family sharing</span>
-        </div>
+        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+          Start with the basics. More detailed topics are here when you need them.
+        </p>
       </div>
 
       {/* Search & Category Filter Toolbar */}
@@ -177,7 +242,7 @@ export const FaqView: React.FC<FaqViewProps> = ({ onNavigate }) => {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search FAQ (e.g., API key, Claude, Cash ISA, PDF, encryption)..."
+            placeholder="Search for help, such as import or backup..."
             className="w-full min-h-[40px] pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
           />
         </div>
@@ -189,6 +254,7 @@ export const FaqView: React.FC<FaqViewProps> = ({ onNavigate }) => {
         >
           {(
             [
+              { id: 'getting_started', label: 'New here' },
               { id: 'all', label: 'All Topics' },
               { id: 'ai_hygiene', label: 'AI & Key Hygiene' },
               { id: 'privacy', label: 'Privacy & Vault' },
@@ -212,15 +278,15 @@ export const FaqView: React.FC<FaqViewProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* Quick Reference: Supported AI Provider Secret Names */}
-      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4">
+      {/* Advanced reference is shown only when the user asks for AI details. */}
+      {category === 'ai_hygiene' && <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
               AI Provider Secret Hygiene Reference
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Add only the provider secret you need in Settings &gt; Secrets or your local .env file, and remove it when finished
+              For the separately hosted web-server mode only. The packaged Windows and Android preview cannot use these keys.
             </p>
           </div>
           <button
@@ -242,7 +308,7 @@ export const FaqView: React.FC<FaqViewProps> = ({ onNavigate }) => {
               GEMINI_API_KEY
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Model: gemini-4-hydrogen · Default structured financial reasoning
+              Configure on the server, never inside a statement file
             </p>
           </div>
           <div className="py-3 md:py-0 md:px-5 space-y-1">
@@ -253,7 +319,7 @@ export const FaqView: React.FC<FaqViewProps> = ({ onNavigate }) => {
               ANTHROPIC_API_KEY
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Model: claude-sonnet-4-5 · Optional second opinion on your summary
+              Configure on the server, never inside a statement file
             </p>
           </div>
           <div className="py-3 md:py-0 md:pl-5 space-y-1">
@@ -264,11 +330,11 @@ export const FaqView: React.FC<FaqViewProps> = ({ onNavigate }) => {
               OPENAI_API_KEY
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Model: gpt-4.1-mini · Optional summary advisor via server proxy
+              Configure on the server, never inside a statement file
             </p>
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* Accordion FAQ List */}
       <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800">

@@ -2,12 +2,14 @@ node_modules/
 build/
 dist/
 release/
+release-studio/
 android/.gradle/
 android/build/
 android/app/build/
 android/capacitor-cordova-android-plugins/build/
 android/local.properties
 coverage/
+qa/
 .DS_Store
 *.log
 .env*

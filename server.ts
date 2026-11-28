@@ -8,6 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = 3000;
+// Personal finance data should not be reachable from the LAN by default.
+const HOST = process.env.CLEARLEDGER_HOST?.trim() || '127.0.0.1';
 const GEMINI_MODEL = 'gemini-4-hydrogen';
 const CLAUDE_MODEL = 'claude-sonnet-4-5';
 const OPENAI_MODEL = 'gpt-4.1-mini';
@@ -418,8 +420,8 @@ export class ErrorOverlay extends HTMLElement {}
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Clearledger server listening on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`Clearledger server listening on http://${HOST}:${PORT}`);
   });
 }
 

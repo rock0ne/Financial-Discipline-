@@ -197,7 +197,7 @@ export const FamilyShareView: React.FC<FamilyShareViewProps> = ({
       URL.revokeObjectURL(url);
 
       setShareStatus(
-        `Encrypted file created exclusively for ${targetLabel} (Device ${envelope.recipientFingerprint}). Only their Clearledger app can decrypt it.`
+        `Encrypted file created for the Share ID saved as ${targetLabel} (Device ${envelope.recipientFingerprint}). Confirm this ID with them through a separate trusted channel before sending.`
       );
       setSharePin('');
     } catch (err) {
@@ -262,7 +262,7 @@ export const FamilyShareView: React.FC<FamilyShareViewProps> = ({
           Encrypted Family Sharing
         </h1>
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          App-bound public-key encryption (ECDH P-256 + AES-256-GCM) · Shared files can only be decrypted inside the intended family member&apos;s Clearledger app
+          Public-key encryption (ECDH P-256 + AES-256-GCM) · Check the recipient&apos;s Share ID before sending
         </p>
       </div>
 
@@ -678,13 +678,13 @@ export const FamilyShareView: React.FC<FamilyShareViewProps> = ({
             </div>
           )}
 
-          {/* Cryptographic Guarantee Details */}
+          {/* Family Share protection details */}
           <div className="pt-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 space-y-1.5">
             <p className="font-medium text-slate-700 dark:text-slate-300">
-              How app-exclusive family decryption works:
+              How Family Share encryption works:
             </p>
             <p>
-              Every Clearledger installation creates a hardware/IndexedDB-bound non-extractable ECDH P-256 keypair. When you share a file, Clearledger encrypts it using an ephemeral key paired exclusively with your family member&apos;s public Share Code, bound with HKDF-SHA256 domain separation and authenticated AES-256-GCM headers.
+              This installation creates a non-extractable ECDH P-256 keypair in browser storage. Clearledger encrypts the file for the public Share Code you provide, using ECDH, HKDF-SHA256 and AES-256-GCM. Verify that code with the recipient separately; encryption cannot tell whether you entered the right person&apos;s code.
             </p>
           </div>
         </section>

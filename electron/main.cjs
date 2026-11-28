@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell, Notification } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Notification } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('path');
 const { pathToFileURL } = require('node:url');
@@ -146,14 +146,17 @@ function createMainWindow() {
   // Load the locally built offline Vite bundle
   mainWindow.loadFile(distIndex);
 
-  // Open external http/https links in the system browser instead of inside Electron
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      shell.openExternal(url);
-      return { action: 'deny' };
+  // This offline app needs no secondary windows or external navigation. Never
+  // let statement content or a renderer link load an untrusted page with the
+  // Clearledger preload bridge attached.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (details) => {
+    if (details.url !== expectedRendererUrl &&
+        !details.url.startsWith(`${expectedRendererUrl}#`)) {
+      details.preventDefault();
     }
-    return { action: 'allow' };
   });
+  mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault());
 }
 
 app.whenReady().then(() => {

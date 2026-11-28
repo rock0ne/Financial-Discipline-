@@ -18,7 +18,9 @@ android {
     }
     buildTypes {
         debug {
-            applicationIdSuffix '.debug'
+            // Override only for isolated synthetic device checks; never use
+            // the ordinary .debug package when it may hold owner data.
+            applicationIdSuffix (project.findProperty('clearledgerDebugSuffix') ?: '.debug')
         }
         release {
             minifyEnabled false

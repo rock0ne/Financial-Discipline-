@@ -288,7 +288,7 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
           Local Vault &amp; Settings
         </h1>
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          100% on-device processing · Optional AI assistant (off by default) · AES-256-GCM local encryption
+          Core tools work on this device · Packaged apps have no AI connection · Set a passphrase to encrypt this vault
         </p>
       </div>
 

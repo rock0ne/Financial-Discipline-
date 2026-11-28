@@ -1,6 +1,6 @@
 # Installing & Building Clearledger for Windows and Android
 
-Clearledger runs 100% locally with AES-256-GCM encrypted on-device storage. You have two ways to run it on **Windows** and **Android**:
+Clearledger's core finance features run locally. Its on-device vault is **not encrypted until you set a passphrase**; with a passphrase it uses AES-256-GCM. The packaged Windows and Android builds have no connected AI provider. You have two ways to run it on **Windows** and **Android**:
 
 ---
 
@@ -22,34 +22,27 @@ Clearledger is configured as an offline-capable **Progressive Web App (PWA)** wi
 
 ## Option 2: Build Native Windows (`.exe`) & Android (`.apk`) Installers Locally
 
-Download or clone this project onto your Windows PC (requires **Node.js 20+**).
+Download or clone this project onto your Windows PC (requires **Node.js 22.13+**).
 
 ### 1. Install Project Dependencies
 ```bash
-npm install
+pnpm install --frozen-lockfile
 ```
 
 ### 2. Build Native Windows Desktop App (`.exe` Installer + Portable `.exe`)
-Install Electron & electron-builder locally on your Windows machine, then build:
-```bash
-npm install -D electron electron-builder
-ELECTRON_BUILD=true npx vite build
-npx electron-builder --win --config electron-builder.json
+Run this on Windows. It makes the native bundle with its content-security policy immediately before packaging:
+```powershell
+pnpm package:windows
 ```
-*(In PowerShell on Windows, run `$env:ELECTRON_BUILD="true"; npx vite build; npx electron-builder --win --config electron-builder.json`.)*
 
-Your outputs will appear in `release/`:
-- `Clearledger Setup <version>.exe` (Windows installer with Start Menu & Desktop shortcuts)
-- `Clearledger <version>.exe` (Single-file portable Windows executable)
+Your outputs will appear in `release-studio/` as an NSIS installer and a portable `.exe`. Unless you sign the installer with a trusted Windows code-signing certificate, Windows may show an unknown-publisher warning. A Let's Encrypt TLS certificate cannot sign Windows software.
 
 ### 3. Build Native Android App (`.apk` / `.aab`)
-Requires **Android Studio** (with Android SDK & JDK 17+):
+Requires **Android Studio** (with Android SDK & JDK 21):
 ```bash
-npm install @capacitor/core @capacitor/android
-npm install -D @capacitor/cli
-npm run build
-npx cap add android
-npx cap sync android
-npx cap open android
+pnpm build:native
+pnpm exec cap sync android
+cd android
+./gradlew assembleRelease
 ```
-In **Android Studio**, choose **Build → Build Bundle(s) / APK(s) → Build APK(s)** (or run `cd android && ./gradlew assembleDebug` to generate `android/app/build/outputs/apk/debug/app-debug.apk`).
+On Windows PowerShell, run `./gradlew.bat assembleRelease` inside `android` instead of `./gradlew assembleRelease`. The resulting release APK is **unsigned** until you sign it with your own keystore. Do not publish a debug APK or add a keystore or bank statement to GitHub.

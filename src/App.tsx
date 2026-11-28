@@ -6,6 +6,7 @@ import {
   CreditCard,
   FileText,
   HelpCircle,
+  House,
   LayoutDashboard,
   ListFilter,
   Lock,
@@ -75,6 +76,7 @@ import {
 import { generateCurrentMonthSummaryPdfDocument } from './utils/pdfReportGenerator';
 import { saveEncryptedVaultDocument, savePdfDocument } from './utils/documentSave';
 import { OverviewView } from './components/OverviewView';
+import { StartHereView } from './components/StartHereView';
 import { SubscriptionsView } from './components/SubscriptionsView';
 import { CutSavingsView } from './components/CutSavingsView';
 import { WealthPlannerView } from './components/WealthPlannerView';
@@ -108,6 +110,7 @@ import {
 } from './utils/localAlertDelivery';
 
 type ActiveTab =
+  | 'start'
   | 'overview'
   | 'subscriptions'
   | 'cuts'
@@ -128,6 +131,13 @@ const NAV_ITEMS: Array<{
   breadcrumb: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
+  {
+    id: 'start',
+    label: 'Start Here',
+    mobileLabel: 'Start',
+    breadcrumb: 'Simple Start',
+    icon: House,
+  },
   {
     id: 'overview',
     label: 'Overview',
@@ -209,12 +219,12 @@ const NAV_ITEMS: Array<{
     id: 'faq',
     label: 'FAQ & Help',
     mobileLabel: 'FAQ',
-    breadcrumb: 'FAQ & API Key Hygiene',
+    breadcrumb: 'FAQ & Help',
     icon: HelpCircle,
   },
 ];
 
-const MOBILE_PRIMARY_TABS: ActiveTab[] = ['overview', 'cuts', 'reports', 'ai', 'vault'];
+const MOBILE_PRIMARY_TABS: ActiveTab[] = ['start', 'overview', 'cuts', 'reports', 'vault'];
 
 export default function App() {
   const isNativePackage = Capacitor.isNativePlatform() || Boolean(
@@ -222,7 +232,7 @@ export default function App() {
       .clearledgerDesktop?.isDesktopApp
   );
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('start');
   const [timeframe, setTimeframe] = useState<'all' | 12 | 6>('all');
   const [importOpen, setImportOpen] = useState(false);
   const importOpenRef = useRef(importOpen);
@@ -1705,23 +1715,25 @@ export default function App() {
             </div>
           )}
 
-          {/* Local Background Spending-Cap Projection Notification Banner */}
-          <CapAlertBanner
-            alerts={capMonitor.visibleAlerts}
-            currency={payload.currency}
-            onDismiss={capMonitor.dismiss}
-            onReviewCaps={handleReviewCaps}
-          />
+          {/* Statement-based spending-cap estimate, outside the simple Start and Help pages */}
+          {activeTab !== 'start' && activeTab !== 'faq' && (
+            <CapAlertBanner
+              alerts={capMonitor.visibleAlerts}
+              currency={payload.currency}
+              onDismiss={capMonitor.dismiss}
+              onReviewCaps={handleReviewCaps}
+            />
+          )}
 
-          {/* Mobile Secondary Switcher for Vault / ISA / Debt / Planner / Subscriptions / Statements / Family / FAQ */}
+          {/* Mobile Secondary Switcher for advanced workspace sections */}
           {(activeTab === 'vault' ||
+            activeTab === 'ai' ||
             activeTab === 'wealth' ||
             activeTab === 'debt' ||
             activeTab === 'planner' ||
             activeTab === 'family' ||
             activeTab === 'ledger' ||
-            activeTab === 'subscriptions' ||
-            activeTab === 'faq') && (
+            activeTab === 'subscriptions') && (
             <div className="md:hidden mb-5 inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-x-auto max-w-full">
               {(
                 [
@@ -1733,6 +1745,7 @@ export default function App() {
                   { id: 'family', label: 'Family' },
                   { id: 'vault', label: 'Vault' },
                   { id: 'faq', label: 'FAQ' },
+                  { id: 'ai', label: 'AI Advisor' },
                 ] as const
               ).map((sub) => (
                 <button
@@ -1749,6 +1762,16 @@ export default function App() {
                 </button>
               ))}
             </div>
+          )}
+
+          {activeTab === 'start' && (
+            <StartHereView
+              isSampleData={payload.isSampleData}
+              transactionCount={payload.transactions.length}
+              alertCount={capMonitor.visibleAlerts.length}
+              onOpenImport={() => setImportOpen(true)}
+              onNavigate={setActiveTab}
+            />
           )}
 
           {activeTab === 'overview' && (
@@ -1967,7 +1990,8 @@ export default function App() {
                   activeTab === 'family' ||
                   activeTab === 'ledger' ||
                   activeTab === 'subscriptions' ||
-                  activeTab === 'faq'));
+                  activeTab === 'faq' ||
+                  activeTab === 'ai'));
             return (
               <button
                 key={item.id}

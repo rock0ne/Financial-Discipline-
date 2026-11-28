@@ -12,6 +12,7 @@
     "start": "node server.ts",
     "build": "vite build",
     "build:native": "node scripts/build-native.mjs",
+    "package:windows": "node scripts/build-native.mjs && electron-builder --win --config electron-builder.json",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",

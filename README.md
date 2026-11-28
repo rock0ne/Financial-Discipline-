@@ -6,6 +6,7 @@ The Clearledger source is publicly visible but rights are reserved; no open-sour
 
 ## Key Features
 
+- **Start Here**: A plain-language first screen shows what to do in three steps. The original detailed Overview remains available, and Help opens with beginner questions before advanced topics.
 - **Local-first vault**: A fictional 14-month sample is loaded on first launch. Data is stored on this device in local IndexedDB and is not encrypted until a vault passphrase is enabled; the passphrase enables AES-256-GCM encryption. Do not keep sensitive statements on a shared or untrusted device without enabling it.
 - **Spending Forecast Engine**: Estimates category trends and cap warnings. Verify imported transactions and totals independently before relying on a forecast.
 - **Smart Ledger, Structured Search & Custom Tags**:
@@ -14,21 +15,24 @@ The Clearledger source is publicly visible but rights are reserved; no open-sour
   - Inline custom transaction tagging plus automated **Tax Deductible** and **Expense Claimable** Smart Tags, all included in spreadsheet-ready CSV exports.
 - **Recurring Subscriptions & 12-Month Projection**: Auto-detects recurring charges and price hikes, lets you classify items as Essential or Cancelable, and forecasts total 12-month recurring expenditure across both Current Habits and Cancelable-Cut scenarios.
 - **Reports & Merchant Analytics**: Printable PDF reports (`jsPDF`) in A4 or US Letter, plus an interactive **Top Spending Merchants by Category Over Time** bar chart.
+- **Optional local alerts**: Set a category threshold, projected-cap rule, or one-time date reminder. Spending checks use imported statements while the app is open, not a live bank feed. Generic device notifications are off until enabled.
 - **Windows & Android Ready**: Installable offline PWA right from Edge/Chrome, plus ready-to-build Electron (`.exe`) and Capacitor (`.apk`) packaging configs.
 
 ## Quick Start
 
 ```bash
-npm install
-npm run dev
+pnpm install --frozen-lockfile
+pnpm dev
 ```
+
+The development server binds to `127.0.0.1` by default so your local vault is not exposed to other devices on the network.
 
 Run the unit test suite, typecheck, and production build:
 
 ```bash
-npm test
-npm run lint
-npm run build
+pnpm test
+pnpm lint
+pnpm build
 ```
 
 ## PDF statement import
