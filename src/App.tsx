@@ -724,8 +724,7 @@ export default function App() {
   const handleEnableOsAlerts = useCallback(async () => {
     const granted = await requestOsAlertOptIn();
     if (granted) {
-      setOsAlertsOptIn(true);
-      const saved = osAlertsOptedIn();
+      const saved = setOsAlertsOptIn(true);
       setOsAlertsEnabled(saved);
       return saved;
     }
@@ -733,11 +732,11 @@ export default function App() {
   }, []);
 
   const handleDisableOsAlerts = useCallback(async () => {
-    setOsAlertsOptIn(false);
+    const optOutSaved = setOsAlertsOptIn(false);
     setOsAlertsEnabled(false);
     let cancellationError: unknown;
     try { await cancelAllManagedLocalNotifications(); } catch (error) { cancellationError = error; }
-    if (osAlertsOptedIn()) {
+    if (!optOutSaved) {
       throw new Error('Device opt-out could not be saved. Disable Clearledger notifications in system settings.');
     }
     if (cancellationError) throw cancellationError;

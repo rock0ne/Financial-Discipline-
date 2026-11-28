@@ -21,7 +21,7 @@ describe('local alert delivery privacy and receipts', () => {
   it('deduplicates one period and clears receipts plus opt-in on shred', () => {
     Object.assign(globalThis, { localStorage: storage });
     stored.clear();
-    setOsAlertsOptIn(true);
+    assert.equal(setOsAlertsOptIn(true), true);
     assert.equal(osAlertsOptedIn(), true);
     const key = 'private-rule:2026-11';
     assert.equal(hasLocalAlertReceipt(key), false);
@@ -36,7 +36,7 @@ describe('local alert delivery privacy and receipts', () => {
   it('reports unconfirmed cleanup when device preference removal fails', () => {
     Object.assign(globalThis, { localStorage: storage });
     stored.clear();
-    setOsAlertsOptIn(true);
+    assert.equal(setOsAlertsOptIn(true), true);
     Object.assign(globalThis, { localStorage: {
       ...storage,
       removeItem: () => { throw new Error('storage blocked'); },
@@ -50,7 +50,7 @@ describe('local alert delivery privacy and receipts', () => {
   it('cannot claim an opt-in when device preference storage rejects writes', () => {
     Object.assign(globalThis, { localStorage: { ...storage, setItem: () => { throw new Error('quota denied'); } } });
     stored.clear();
-    setOsAlertsOptIn(true);
+    assert.equal(setOsAlertsOptIn(true), false);
     assert.equal(osAlertsOptedIn(), false);
     Object.assign(globalThis, { localStorage: storage });
   });
@@ -60,8 +60,18 @@ describe('local alert delivery privacy and receipts', () => {
     stored.clear();
     setOsAlertsOptIn(true);
     Object.assign(globalThis, { localStorage: { ...storage, removeItem: () => { throw new Error('write denied'); } } });
-    setOsAlertsOptIn(false);
+    assert.equal(setOsAlertsOptIn(false), false);
     assert.equal(osAlertsOptedIn(), true);
+    Object.assign(globalThis, { localStorage: storage });
+    stored.clear();
+  });
+
+  it('does not confirm opt-out if preference readback is unavailable', () => {
+    Object.assign(globalThis, { localStorage: storage });
+    stored.clear();
+    assert.equal(setOsAlertsOptIn(true), true);
+    Object.assign(globalThis, { localStorage: { ...storage, getItem: () => { throw new Error('read blocked'); } } });
+    assert.equal(setOsAlertsOptIn(false), false);
     Object.assign(globalThis, { localStorage: storage });
     stored.clear();
   });

@@ -48,13 +48,16 @@ export function osAlertsOptedIn(): boolean {
   }
 }
 
-export function setOsAlertsOptIn(enabled: boolean): void {
+/** Returns false when the device preference write/readback cannot be confirmed. */
+export function setOsAlertsOptIn(enabled: boolean): boolean {
   if (!enabled) deliveryEpoch += 1;
   try {
     if (enabled) localStorage.setItem(OPT_IN_KEY, 'enabled');
     else localStorage.removeItem(OPT_IN_KEY);
+    return (localStorage.getItem(OPT_IN_KEY) === 'enabled') === enabled;
   } catch {
     // Device preference storage can be unavailable; callers must not infer consent.
+    return false;
   }
 }
 
