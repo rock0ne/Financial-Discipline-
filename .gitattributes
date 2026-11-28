@@ -1,0 +1,3 @@
+android/gradlew text eol=lf
+android/app/capacitor.build.gradle text eol=lf
+android/capacitor.settings.gradle text eol=lf

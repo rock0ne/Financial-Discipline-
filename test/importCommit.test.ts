@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateSample14MonthData } from '../src/utils/sampleData';
+import { createEmptyVault } from '../src/utils/emptyVault';
 import {
   applyConfirmedPdfAccountLabels,
   commitStatementImport,
@@ -78,7 +79,7 @@ describe('confirmed statement import', () => {
 
   it('deduplicates per account rather than discarding a matching transaction in another account', async () => {
     const payload = {
-      ...generateSample14MonthData(),
+      ...createEmptyVault(),
       transactions: [transaction('account-a', 'existing')],
       imports: [meta('account-a')],
     };
@@ -107,6 +108,8 @@ describe('confirmed statement import', () => {
       importBatchId: 'batch-b',
     };
     assert.equal(isValidPdfAccountLabel(''), false);
+    assert.equal(isValidPdfAccountLabel('Account 12345678'), false);
+    assert.equal(isValidPdfAccountLabel('Account 60-04-20'), false);
     assert.throws(() => applyConfirmedPdfAccountLabels([first], {}), /confirmed stable account label/);
     const labeled = applyConfirmedPdfAccountLabels(
       [first, second],
@@ -133,7 +136,7 @@ describe('confirmed statement import', () => {
       [{ ...transaction('statement (1)', 'new'), sourceFile: 'statement (1).pdf', importBatchId: 'renamed' }],
       { renamed: 'Current Account A' }
     );
-    const payload = { ...generateSample14MonthData(), transactions: [original], imports: [] };
+    const payload = { ...createEmptyVault(), transactions: [original], imports: [] };
     const result = await commitStatementImport(
       payload, renamed, [{ ...meta('statement (1)'), id: 'renamed', fileName: 'statement (1).pdf' }],
       false, async (next) => { assert.equal(next.transactions.length, 1); }
@@ -157,5 +160,85 @@ describe('confirmed statement import', () => {
       async (next) => { assert.equal(next.transactions.length, 2); }
     );
     assert.deepEqual(repeated, { added: 0, skipped: 2 });
+  });
+
+  it('never merges fictional sample rows, goals or rules into a real import', async () => {
+    const sample = generateSample14MonthData();
+    assert.ok(sample.transactions.length > 0);
+    assert.ok(sample.goals.length > 0);
+    let saved: VaultPayload | undefined;
+    await commitStatementImport(
+      sample,
+      [transaction('Real current account', 'real-1')],
+      [meta('Real current account')],
+      false,
+      async (next) => { saved = next; }
+    );
+    assert.equal(saved?.isSampleData, false);
+    assert.deepEqual(saved?.transactions.map((tx) => tx.id), ['real-1']);
+    assert.deepEqual(saved?.goals, []);
+    assert.deepEqual(saved?.categoryRules, []);
+    assert.deepEqual(saved?.debts, []);
+    assert.deepEqual(saved?.imports.map((entry) => entry.id), [meta('Real current account').id]);
+  });
+
+  it('starts a new vault without fictional transactions or goals', () => {
+    const empty = createEmptyVault();
+    assert.equal(empty.isSampleData, false);
+    assert.deepEqual(empty.transactions, []);
+    assert.deepEqual(empty.imports, []);
+    assert.deepEqual(empty.goals, []);
+    assert.deepEqual(empty.debts, []);
+  });
+
+  it('cleans an older mixed ledger without deleting real transactions', async () => {
+    const sample = generateSample14MonthData();
+    const priorReal = transaction('Real current account', 'real-prior');
+    const mixed: VaultPayload = {
+      ...sample,
+      isSampleData: false,
+      transactions: [sample.transactions[0], priorReal],
+      imports: [sample.imports[0], meta('Real current account')],
+    };
+    let saved: VaultPayload | undefined;
+    const result = await commitStatementImport(
+      mixed,
+      [transaction('Real savings account', 'real-new')],
+      [meta('Real savings account')],
+      false,
+      async (next) => { saved = next; }
+    );
+    assert.deepEqual(saved?.transactions.map((tx) => tx.id).sort(), ['real-new', 'real-prior']);
+    assert.equal(saved?.imports.some((entry) => entry.id.startsWith('sample-import-')), false);
+    assert.deepEqual(saved?.goals, []);
+    assert.deepEqual(saved?.debts, []);
+    assert.deepEqual(saved?.categoryRules, []);
+    assert.equal(result.legacySampleSettingsReview, true);
+  });
+
+  it('preserves user-edited settings that originated in an older mixed sample', async () => {
+    const sample = generateSample14MonthData();
+    const editedGoal = { ...sample.goals[0], name: 'My real emergency fund' };
+    const mixed: VaultPayload = {
+      ...sample,
+      isSampleData: false,
+      transactions: [sample.transactions[0], transaction('Real account', 'real-prior')],
+      imports: [sample.imports[0], meta('Real account')],
+      goals: [editedGoal],
+      categoryCaps: { ...sample.categoryCaps },
+      recurringActions: { ...sample.recurringActions },
+    };
+    let saved: VaultPayload | undefined;
+    await commitStatementImport(
+      mixed,
+      [transaction('Other real account', 'real-new')],
+      [meta('Other real account')],
+      false,
+      async (next) => { saved = next; }
+    );
+    assert.deepEqual(saved?.goals, [editedGoal]);
+    assert.deepEqual(saved?.categoryCaps, mixed.categoryCaps);
+    assert.deepEqual(saved?.recurringActions, mixed.recurringActions);
+    assert.deepEqual(saved?.transactions.map((tx) => tx.id).sort(), ['real-new', 'real-prior']);
   });
 });

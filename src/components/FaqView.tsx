@@ -35,7 +35,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'AI & Key Hygiene',
     question: 'How does timed AI access hygiene work when I no longer need AI advice?',
     answer:
-      'In the AI Advisor tab, you choose a strict access window (5, 15, or 30 minutes, or Single Query Only). When the countdown finishes—or when you click "End Session & Clear AI Context Now"—outbound AI calls lock automatically and cached advice is cleared from memory. For full API key hygiene between monthly statement reviews, remove or rotate unused keys in Settings > Secrets or set short expiry dates in your AI provider dashboard.',
+      'In the AI Advisor tab, choose Single Query, 15 minutes, 1 hour, 7 days, or 30 days. When the window expires, the app switches its AI Advisor back to Off; Forget & Turn Off also clears the displayed advice from memory. A configured key remains on your local server until you remove or rotate it, so expiry is not a provider-side key revocation.',
     actionLabel: 'Configure Session Timer',
     actionTab: 'ai',
   },
@@ -45,7 +45,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'AI & Key Hygiene',
     question: 'Do Gemini, Claude, or ChatGPT ever see my bank statements or merchant names?',
     answer:
-      'No. All statement parsing, categorization, recurring subscription detection, and cap tracking run 100% locally on your device. Only a compact, allowlisted summary packet (which you can inspect line-by-line with "Inspect Outbound JSON") is sent when you explicitly request advice. You can also turn on "Mask exact amounts" so even rounded totals are replaced with percentages and income bands.',
+      'Bank statements and individual ledger rows are not automatically sent. When you explicitly ask for advice, the selected provider receives an allowlisted summary and the optional question you typed. Do not put names, merchant details, account numbers, or raw transactions in that question. Inspect Outbound JSON shows the exact request to the local proxy, including the question; the proxy adds instructions before forwarding it. Mask exact amounts replaces rounded totals with ratios and income bands.',
     actionLabel: 'Inspect AI Firewall',
     actionTab: 'ai',
   },

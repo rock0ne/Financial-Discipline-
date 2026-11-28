@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
+import { validateSanitizedPacket } from './src/utils/aiOutboundPolicy';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,73 +35,14 @@ function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
-// Strict allowlist validation to guarantee zero raw statements or PII are processed by the API route
-function validateSanitizedPacket(
-  raw: unknown
-): { ok: true; data: Record<string, unknown> } | { ok: false; error: string } {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, error: 'Request must include a sanitized financial summary object.' };
-  }
-  const obj = raw as Record<string, unknown>;
-  if (obj.schemaVersion !== 'clearledger-zero-pii-v1') {
-    return {
-      ok: false,
-      error: 'Unsupported summary schema. Only zero-PII local summaries are accepted.',
-    };
-  }
-
-  // Explicitly reject any raw transaction or PII keys
-  const forbiddenKeys = [
-    'transactions',
-    'rawCsv',
-    'accountNumber',
-    'sortCode',
-    'iban',
-    'merchants',
-    'descriptions',
-  ];
-  for (const key of forbiddenKeys) {
-    if (key in obj) {
-      return { ok: false, error: `Privacy guard rejected disallowed field: ${key}` };
-    }
-  }
-
-  const allowedKeys = new Set([
-    'schemaVersion',
-    'privacyMode',
-    'currency',
-    'monthsAnalyzed',
-    'incomeBand',
-    'ratios',
-    'monthlyAveragesRounded',
-    'recurringSignals',
-    'categoryBreakdown',
-    'isaStrategy',
-    'goals',
-  ]);
-
-  const clean: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (allowedKeys.has(k)) {
-      clean[k] = v;
-    }
-  }
-
-  if (!Array.isArray(clean.categoryBreakdown) || clean.categoryBreakdown.length > 25) {
-    return { ok: false, error: 'Invalid category breakdown array.' };
-  }
-
-  return { ok: true, data: clean };
-}
-
 function buildAdvisorPrompt(summaryData: Record<string, unknown>, userQuestion: string): string {
   return [
-    'Below is a strictly anonymized, locally computed household financial summary (zero raw bank transactions, zero merchant names, zero personal identifiers).',
+    'Below is a locally computed household financial summary. It contains no raw bank transactions, merchant names, or personal identifiers.',
     '',
     JSON.stringify(summaryData, null, 2),
     '',
     userQuestion
-      ? `The user also asked this specific question: "${userQuestion}". Make sure to answer it thoroughly in the directAnswer field using their summary metrics.`
+      ? `The user also asked this specific question, entered by them and forwarded as written: "${userQuestion}". Make sure to answer it thoroughly in the directAnswer field using their summary metrics.`
       : 'No custom question was provided. Provide a clear, high-impact savings and ISA strategy review.',
   ].join('\n');
 }
@@ -418,8 +360,8 @@ export class ErrorOverlay extends HTMLElement {}
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Clearledger server listening on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, '127.0.0.1', () => {
+    console.log(`Clearledger server listening on http://127.0.0.1:${PORT}`);
   });
 }
 

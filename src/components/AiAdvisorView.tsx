@@ -24,6 +24,7 @@ import {
   buildSanitizedAiPacket,
   type AiAdvisorResponse,
 } from '../utils/privacySanitizer';
+import { buildAdvisorRequestJson } from '../utils/aiOutboundPolicy';
 import {
   AI_PROVIDER_LABELS,
   AI_RETENTION_OPTIONS,
@@ -102,9 +103,9 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
     [analytics, isaSettings, goals, currency, aiSettings.ratiosOnly]
   );
 
-  const packetJson = useMemo(
-    () => JSON.stringify(sanitizedPacket, null, 2),
-    [sanitizedPacket]
+  const requestJson = useMemo(
+    () => buildAdvisorRequestJson(aiSettings.provider, sanitizedPacket, question),
+    [aiSettings.provider, sanitizedPacket, question]
   );
 
   const isOff = aiSettings.provider === 'off';
@@ -116,7 +117,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
     aiSettings.provider !== 'off' ? providerStatus?.[aiSettings.provider] ?? null : null;
   const activeProviderLabel = AI_PROVIDER_LABELS[aiSettings.provider];
 
-  const handleRequestAdvice = async (customPrompt?: string) => {
+  const handleRequestAdvice = async () => {
     if (isNativePackage) {
       setError('AI Advisor is unavailable in this private native build; no data was sent.');
       return;
@@ -129,20 +130,11 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
     setError(null);
     setSessionNotice(null);
     setLoading(true);
-    const activeQuestion = (customPrompt ?? question).trim();
-    if (customPrompt !== undefined) {
-      setQuestion(customPrompt);
-    }
-
     try {
       const res = await fetch('/api/ai-advisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: aiSettings.provider,
-          summary: sanitizedPacket,
-          question: activeQuestion,
-        }),
+        body: requestJson,
       });
 
       const data = await res.json();
@@ -291,7 +283,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
         </div>
       )}
 
-      {/* Zero-PII Firewall Summary Strip */}
+      {/* Explain the boundary of the generated summary and the user-authored question. */}
       <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -304,9 +296,9 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
                 <span className="font-mono-num text-slate-800 dark:text-slate-200">
                   {transactionCount}
                 </span>{' '}
-                raw transactions stay strictly on-device ·{' '}
-                <span className="font-mono-num text-teal-700 dark:text-teal-400">0</span>{' '}
-                merchants, dates, descriptions, or account numbers are ever transmitted
+                ledger rows are not added to the AI summary. Your optional question is
+                also sent to the selected provider, so do not include names, account
+                numbers, merchant details, or transaction text.
               </p>
             </div>
           </div>
@@ -342,15 +334,18 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
           <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
               <span>
-                Exact payload sent when enabled ({new Blob([packetJson]).size} bytes · strictly allowlisted schema)
+                Exact JSON request to the local proxy, including your question ({new Blob([requestJson]).size} bytes)
               </span>
               <span className="font-mono-num">
                 {aiSettings.ratiosOnly ? 'Ratios & Bands Only' : 'Rounded Category Totals'}
               </span>
             </div>
             <pre className="p-4 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-700 dark:text-slate-300 overflow-x-auto max-h-72 leading-relaxed">
-              {packetJson}
+              {requestJson}
             </pre>
+            <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+              The proxy adds instructions before forwarding the summary and question to the selected AI provider.
+            </p>
           </div>
         )}
       </section>
@@ -416,13 +411,21 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
             </button>
           </form>
 
+          <p className="text-xs text-amber-800 dark:text-amber-300">
+            Review the outbound JSON before asking. Your typed question is sent with the summary;
+            leave out personal and bank details.
+          </p>
+
           <div className="flex flex-wrap gap-2">
             {SUGGESTED_QUESTIONS.map((q) => (
               <button
                 key={q}
                 type="button"
                 disabled={loading || analytics.monthCount === 0 || isNativePackage}
-                onClick={() => void handleRequestAdvice(q)}
+                onClick={() => {
+                  setQuestion(q);
+                  setShowInspector(true);
+                }}
                 className="min-h-[36px] text-left px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 text-xs text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
               >
                 {q}
@@ -467,7 +470,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
                 Assessment of Your Anonymized Summary
               </h2>
               <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                {advice.modelUsed} · Zero raw transactions shared
+                {advice.modelUsed} · Generated summary shared
               </span>
             </div>
 

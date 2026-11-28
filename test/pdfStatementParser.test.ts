@@ -280,4 +280,231 @@ describe('pdfStatementParser (local UK/US/EU bank PDF statement engine)', () => 
     assert.equal(billParsed.transactions.length, 0);
     assert.ok(billParsed.warnings[0].toLowerCase().includes('skipped'));
   });
+
+  it('normalizes EU decimal commas without changing UK grouping or negative signs', () => {
+    assert.equal(parsePdfMoneyCell('€12,34')?.absValue, 12.34);
+    assert.equal(parsePdfMoneyCell('€1.234,56')?.absValue, 1234.56);
+    assert.equal(parsePdfMoneyCell('-€1.234,56')?.explicitSign, -1);
+    assert.equal(parsePdfMoneyCell('£1,234.56')?.absValue, 1234.56);
+    assert.equal(parsePdfMoneyCell('£1,234.56 DR')?.explicitSign, -1);
+    assert.equal(parsePdfMoneyCell('1,234,56'), null);
+    const merged = groupPdfPagesIntoRows([{ pageNumber: 1, spans: [
+      { x: 100, y: 500, width: 180, height: 10, text: 'FICTIONAL SHOP €1.234,56' },
+    ] }]);
+    assert.deepEqual(merged[0].cells.map((cell) => cell.text), ['FICTIONAL SHOP', '€1.234,56']);
+  });
+
+  it('rejects every staged row when a later dated transaction has an unreadable amount', () => {
+    const pages: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Details' },
+          { x: 380, text: 'Amount' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 40, text: '01 Nov 2026' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 380, text: '-£10.00' },
+        ]),
+        ...makeRowSpans(660, [
+          { x: 40, text: '02 Nov 2026' },
+          { x: 120, text: 'FICTIONAL CAFE' },
+          { x: 380, text: '20,0X' },
+        ]),
+      ],
+    }];
+    const parsed = parsePdfStatementPages(pages, 'fictional.pdf');
+    assert.equal(parsed.transactions.length, 0);
+    assert.match(parsed.warnings[0], /No rows from this PDF were staged/);
+    assert.doesNotMatch(parsed.warnings.join(' '), /FICTIONAL CAFE/);
+  });
+
+  it('rejects an unsigned amount when no trustworthy direction evidence exists', () => {
+    const pages: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Details' },
+          { x: 380, text: 'Amount' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 40, text: '01 Nov 2026' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 380, text: '-£10.00' },
+        ]),
+        ...makeRowSpans(660, [
+          { x: 40, text: '02 Nov 2026' },
+          { x: 120, text: 'ACME TRANSFER' },
+          { x: 380, text: '100.00' },
+        ]),
+      ],
+    }];
+    const parsed = parsePdfStatementPages(pages, 'fictional.pdf');
+    assert.equal(parsed.transactions.length, 0);
+    assert.match(parsed.warnings[0], /no verifiable direction/);
+  });
+
+  it('rejects a yearless transaction outside an explicit statement period', () => {
+    const pages: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Details' },
+          { x: 380, text: 'Amount' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 40, text: '05 Jun' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 380, text: '-£10.00' },
+        ]),
+      ],
+    }];
+    const options = {
+      statementPeriodStart: '2026-10-01',
+      statementPeriodEnd: '2026-10-31',
+    };
+    const parsed = parsePdfStatementPages(pages, 'fictional.pdf', options);
+    assert.equal(resolveYearlessDate(5, 6, extractStatementDateContext(groupPdfPagesIntoRows(pages), 'fictional.pdf', options)), null);
+    assert.equal(parsed.transactions.length, 0);
+    assert.match(parsed.warnings[0], /outside the statement period/);
+  });
+
+  it('rejects an explicit amount sign that contradicts the running balance', () => {
+    const pages: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Description' },
+          { x: 380, text: 'Paid Out' },
+          { x: 500, text: 'Balance' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 120, text: 'BALANCE BROUGHT FORWARD' },
+          { x: 500, text: '100.00' },
+        ]),
+        ...makeRowSpans(660, [
+          { x: 40, text: '01 Nov 2026' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 380, text: '+£10.00' },
+          { x: 500, text: '90.00' },
+        ]),
+      ],
+    }];
+    const parsed = parsePdfStatementPages(pages, 'fictional.pdf');
+    assert.equal(parsed.transactions.length, 0);
+    assert.match(parsed.warnings[0], /no verifiable direction/i);
+  });
+
+  it('rejects ambiguous numeric dates instead of inheriting a previous row date', () => {
+    assert.equal(parseLeadingPdfDate('13/04/2026')?.isoDate, '2026-04-13');
+    assert.equal(parseLeadingPdfDate('04/13/2026')?.isoDate, '2026-04-13');
+    const pages: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Details' },
+          { x: 380, text: 'Amount' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 40, text: '13/04/2026' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 380, text: '-£10.00' },
+        ]),
+        ...makeRowSpans(660, [
+          { x: 40, text: '03/04/2026' },
+          { x: 120, text: 'FICTIONAL CAFE' },
+          { x: 380, text: '-£20.00' },
+        ]),
+      ],
+    }];
+    const parsed = parsePdfStatementPages(pages, 'fictional.pdf');
+    assert.equal(parsed.transactions.length, 0);
+    assert.match(parsed.warnings[0], /ambiguous numeric PDF date/);
+  });
+
+  it('does not treat a pre-table dated summary as an unfinished transaction', () => {
+    const pages: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(760, [
+          { x: 40, text: '05 Nov 2026' },
+          { x: 120, text: 'ACCOUNT OVERVIEW' },
+        ]),
+        ...makeRowSpans(740, [
+          { x: 120, text: 'BALANCE BROUGHT FORWARD' },
+          { x: 500, text: '100.00' },
+        ]),
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Description' },
+          { x: 380, text: 'Paid Out' },
+          { x: 500, text: 'Balance' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 40, text: '01 Nov 2026' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 380, text: '10.00' },
+          { x: 500, text: '90.00' },
+        ]),
+      ],
+    }];
+    const parsed = parsePdfStatementPages(pages, 'fictional.pdf');
+    assert.equal(parsed.transactions.length, 1);
+    assert.equal(parsed.transactions[0].amount, -10);
+    assert.equal(parsed.warnings.length, 0);
+  });
+
+  it('carries verified movements across blank balance cells before reconciling the next balance', () => {
+    const pages: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Description' },
+          { x: 350, text: 'Paid Out' },
+          { x: 425, text: 'Paid In' },
+          { x: 500, text: 'Balance' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 120, text: 'BALANCE BROUGHT FORWARD' },
+          { x: 500, text: '100.00' },
+        ]),
+        ...makeRowSpans(660, [
+          { x: 40, text: '01 Nov 2026' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 350, text: '10.00' },
+          { x: 500, text: '90.00' },
+        ]),
+        ...makeRowSpans(640, [
+          { x: 120, text: 'FICTIONAL CAFE' },
+          { x: 350, text: '20.00' },
+        ]),
+        ...makeRowSpans(620, [
+          { x: 120, text: 'FICTIONAL REFUND' },
+          { x: 425, text: '5.00' },
+          { x: 500, text: '75.00' },
+        ]),
+      ],
+    }];
+    const parsed = parsePdfStatementPages(pages, 'fictional.pdf');
+    assert.equal(parsed.transactions.length, 3);
+    assert.deepEqual(parsed.transactions.map((tx) => tx.amount), [-10, -20, 5]);
+    assert.equal(parsed.warnings.length, 0);
+
+    const contradicted: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: pages[0].spans.map((span) =>
+        span.y === 620 && span.x === 500 ? { ...span, text: '76.00' } : span
+      ),
+    }];
+    const rejected = parsePdfStatementPages(contradicted, 'fictional.pdf');
+    assert.equal(rejected.transactions.length, 0);
+    assert.match(rejected.warnings[0], /running balance/);
+  });
 });

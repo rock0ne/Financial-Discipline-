@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('path');
 const { pathToFileURL } = require('node:url');
@@ -125,14 +125,10 @@ function createMainWindow() {
   // Load the locally built offline Vite bundle
   mainWindow.loadFile(distIndex);
 
-  // Open external http/https links in the system browser instead of inside Electron
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      shell.openExternal(url);
-      return { action: 'deny' };
-    }
-    return { action: 'allow' };
-  });
+  // The finance renderer has no external navigation flow. Keep both top-level
+  // navigation and popup windows inside the local bundled-app boundary.
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
 
 app.whenReady().then(() => {

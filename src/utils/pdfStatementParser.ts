@@ -166,12 +166,6 @@ const BOILERPLATE_CONTINUATION_RE =
 const CREDIT_CARD_DOC_RE =
   /\b(credit\s+card\s+statement|credit\s+limit|minimum\s+payment|available\s+credit|card\s+number\s+ending)\b/i;
 
-const CREDIT_DESC_RE =
-  /\b(salary|payroll|bacs\s+credit|faster\s+payment\s+(?:from|in)|direct\s+credit|credit\s+interest|interest\s+paid|interest\s+credit|refund|cashback|dividend|hmrc\s+refund|transfer\s+from|payment\s+received|paid\s+in|deposit|credit\s+giro)\b/i;
-
-const DEBIT_DESC_RE =
-  /\b(card\s+payment|contactless|direct\s+debit|standing\s+order|faster\s+payment\s+to|cash\s+withdrawal|atm\s+|pos\s+|visa\s+purchase|debit\s+card|bill\s+payment|monthly\s+fee|overdraft\s+fee|bank\s+charge)\b/i;
-
 function isValidCalendarDate(year: number, month: number, day: number): boolean {
   if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
   if (year < 1990 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return false;
@@ -351,6 +345,16 @@ export function parseLeadingPdfDate(raw: string): ParsedDateToken | null {
   }
 
   return null;
+}
+
+function isAmbiguousNumericDate(raw: string): boolean {
+  const s = raw.trim();
+  const full = /^(\d{1,2})([/\-.])(\d{1,2})\2\d{2,4}(?=\s|$|[,\-;])/.exec(s);
+  const yearless = /^(\d{1,2})\/(\d{1,2})(?=\s|$)/.exec(s);
+  const a = Number(full?.[1] ?? yearless?.[1]);
+  const b = Number(full?.[3] ?? yearless?.[2]);
+  return Number.isInteger(a) && Number.isInteger(b) &&
+    a >= 1 && a <= 12 && b >= 1 && b <= 12 && a !== b;
 }
 
 /**
@@ -552,15 +556,9 @@ export function resolveYearlessDate(
       }
     }
 
-    // Allow a small ±7 day posting buffer around period boundaries
-    const startMs = Date.parse(`${context.periodStart}T00:00:00Z`) - 7 * 86_400_000;
-    const endMs = Date.parse(`${context.periodEnd}T00:00:00Z`) + 7 * 86_400_000;
-    for (const yr of candidateYears) {
-      const iso = toIsoDate(yr, month, day);
-      if (!iso) continue;
-      const ms = Date.parse(`${iso}T00:00:00Z`);
-      if (ms >= startMs && ms <= endMs) return iso;
-    }
+    // A stated inclusive period is a constraint, not merely a hint for choosing
+    // a nearby year. Never silently date a transaction outside that period.
+    return null;
   }
 
   const anchor = context.anchorDate ?? new Date().toISOString().slice(0, 10);
@@ -611,20 +609,35 @@ export function parsePdfMoneyCell(raw: string): ParsedMoneyToken | null {
   const leadingMinus = /^[-−–]\s*[£$€]?|^[£$€]\s*[-−–]/.test(s) || /[-−]\s*$/.test(s);
   const leadingPlus = /^\+\s*[£$€]?|^[£$€]\s*\+/.test(s);
 
-  const stripped = s
+  const numberText = s
     .replace(/^\((.+)\)$/, '$1')
     .replace(/\b(?:DR|CR|OD|GBP|USD|EUR|CAD|AUD|CHF|JPY)\b/gi, '')
     .replace(/[DC]\s*$/i, '')
-    .replace(/[£$€¥₹,\s]/g, '')
+    .replace(/[£$€¥₹\s]/g, '')
     .replace(/^[-−–+]+|[-−–+]+$/g, '')
     .trim();
 
-  // Require decimal with 2 digits (standard bank format: 12.34, 1,200.00) or explicit currency symbol
-  const hasTwoDecimals = /^\d+\.\d{2}$/.test(stripped);
-  const isCurrencyWhole = Boolean(currency) && /^\d+(?:\.\d{1,2})?$/.test(stripped);
+  // Distinguish decimal commas from thousands separators before converting.
+  // Stripping every comma turns EUR 12,34 into 1234 and corrupts the ledger.
+  let normalized = numberText;
+  if (/^\d{1,3}(?:,\d{3})+\.\d{2}$/.test(numberText)) {
+    normalized = numberText.replace(/,/g, '');
+  } else if (/^\d{1,3}(?:\.\d{3})+,\d{2}$/.test(numberText)) {
+    normalized = numberText.replace(/\./g, '').replace(',', '.');
+  } else if (/^\d+,\d{2}$/.test(numberText)) {
+    normalized = numberText.replace(',', '.');
+  } else if (currency && /^\d{1,3}(?:[,\.]\d{3})+$/.test(numberText)) {
+    normalized = numberText.replace(/[,\.]/g, '');
+  } else if (numberText.includes(',')) {
+    return null;
+  }
+
+  // Require two decimal places, or a whole/one-decimal amount with an explicit currency.
+  const hasTwoDecimals = /^\d+\.\d{2}$/.test(normalized);
+  const isCurrencyWhole = Boolean(currency) && /^\d+(?:\.\d{1,2})?$/.test(normalized);
   if (!hasTwoDecimals && !isCurrencyWhole) return null;
 
-  const absValue = Number(stripped);
+  const absValue = Number(normalized);
   if (!Number.isFinite(absValue) || absValue < 0 || absValue > 10_000_000) return null;
 
   let explicitSign: -1 | 1 | null = null;
@@ -648,7 +661,7 @@ function splitCellMoneyTokens(cell: PdfCell): PdfCell[] {
 
   // Look for space-separated monetary tokens at the right end of a single PDF span
   const moneyTokenRe =
-    /(?:^|\s)((?:\(?[-−+]?[£$€]?\d{1,3}(?:,\d{3})*\.\d{2}[-−+]?\)?(?:\s*(?:CR|DR|OD|D|C))?))(?=\s|$)/gi;
+    /(?:^|\s)((?:\(?[-−+]?[£$€]?(?:\d{1,3}(?:,\d{3})*\.\d{2}|\d+(?:\.\d{3})*,\d{2})[-−+]?\)?(?:\s*(?:CR|DR|OD|D|C))?))(?=\s|$)/gi;
   const matches: Array<{ index: number; token: string; fullStart: number }> = [];
   let m: RegExpExecArray | null;
   while ((m = moneyTokenRe.exec(cell.text)) !== null) {
@@ -963,31 +976,28 @@ function resolveSignedAmount(params: {
   prevBalance: number | null;
   layout: TableColumnLayout;
   paymentCode: string | null;
-  description: string;
-}): number {
-  const { txCell, txMoney, rowBalance, prevBalance, layout, paymentCode, description } = params;
+}): number | null {
+  const { txCell, txMoney, rowBalance, prevBalance, layout, paymentCode } = params;
   const absVal = txMoney.absValue;
+
+  let balanceDirection: -1 | 1 | null = null;
+  if (rowBalance !== null && prevBalance !== null) {
+    const outMatches = Math.abs(prevBalance - absVal - rowBalance) <= 0.025;
+    const inMatches = Math.abs(prevBalance + absVal - rowBalance) <= 0.025;
+    // An inconsistent running balance is evidence of a misread row or amount.
+    if (outMatches === inMatches) return null;
+    balanceDirection = outMatches ? -1 : 1;
+  }
 
   // 1. Explicit sign directly on the amount token (-45.00, +100.00, 45.00 CR, 45.00 DR)
   if (txMoney.explicitSign !== null) {
     // On credit card statements, positive amounts are expenses and CR/- are refunds/payments
-    if (layout.isCreditCard) {
-      return txMoney.explicitSign === 1 ? absVal : -absVal;
-    }
+    if (balanceDirection !== null && txMoney.explicitSign !== balanceDirection) return null;
     return txMoney.explicitSign * absVal;
   }
 
   // 2. Running balance math verification (gold standard on UK/EU current account statements!)
-  if (rowBalance !== null && prevBalance !== null) {
-    const outDiff = Math.abs(prevBalance - absVal - rowBalance);
-    const inDiff = Math.abs(prevBalance + absVal - rowBalance);
-    if (outDiff <= 0.025 && inDiff > 0.05) {
-      return -absVal;
-    }
-    if (inDiff <= 0.025 && outDiff > 0.05) {
-      return absVal;
-    }
-  }
+  if (balanceDirection !== null) return balanceDirection * absVal;
 
   // 3. Split Paid Out / Paid In column X-alignment
   if (layout.paidOutCol && layout.paidInCol) {
@@ -1008,13 +1018,9 @@ function resolveSignedAmount(params: {
     if (DEBIT_PAYMENT_CODES.has(paymentCode)) return -absVal;
   }
 
-  // 5. Description heuristics
-  if (CREDIT_DESC_RE.test(description) && !DEBIT_DESC_RE.test(description)) {
-    return absVal;
-  }
-
-  // Default for unsigned bank transaction rows: outflow (debit)
-  return -absVal;
+  // Text such as "transfer" or "refund" does not prove direction. An unsigned
+  // amount without a balance delta, direction column or bank code is unsafe.
+  return null;
 }
 
 /**
@@ -1028,6 +1034,12 @@ export function parsePdfStatementPages(
   options: PdfParseOptions = {}
 ): ParsedStatementResult {
   const warnings: string[] = [];
+  const rejectIncomplete = (): ParsedStatementResult => ({
+    transactions: [],
+    warnings: [
+      'A dated PDF transaction row was incomplete or interrupted. No rows from this PDF were staged; export CSV/OFX if the layout is unsupported.',
+    ],
+  });
   const rows = groupPdfPagesIntoRows(pages);
 
   if (rows.length === 0) {
@@ -1039,6 +1051,22 @@ export function parsePdfStatementPages(
 
   const fullDocText = rows.map((r) => r.text).join('\n');
   const isCreditCard = CREDIT_CARD_DOC_RE.test(fullDocText);
+  const hasTableHeader = rows.some(
+    (row, index) => detectTableHeader(row, rows[index + 1], isCreditCard) !== null
+  );
+  // Classify obvious non-statement documents before strict row validation, so
+  // a date and amount on an unrelated bill cannot mask its document type.
+  const looksLikeNonStatementDoc =
+    !hasTableHeader &&
+    /\b(meter\s+reading|kwh|standing\s+charge|electricity\s+supply|gas\s+supply|dear\s+parent|headteacher|school\s+term|council\s+tax\s+bill)\b/i.test(
+      fullDocText
+    );
+  if (looksLikeNonStatementDoc) {
+    return {
+      transactions: [],
+      warnings: ['Skipped (appears to be a utility bill or letter rather than a bank statement).'],
+    };
+  }
   const docCurrency =
     parseCurrencyFromText(fullDocText) ??
     parseCurrencyFromText(fileName) ??
@@ -1071,6 +1099,7 @@ export function parsePdfStatementPages(
 
     // On page break, clear any dangling pending entry so header lines don't merge into it
     if (row.pageNumber !== lastPageNumber) {
+      if (pendingEntry) return rejectIncomplete();
       pendingEntry = null;
       lastPageNumber = row.pageNumber;
     }
@@ -1078,6 +1107,7 @@ export function parsePdfStatementPages(
     // 1. Check if this row (or this row + wrapped subheader) is a table header
     const headerMatch = detectTableHeader(row, rows[rowIdx + 1], isCreditCard);
     if (headerMatch) {
+      if (pendingEntry) return rejectIncomplete();
       const detectedHeader = headerMatch.layout;
       layout = {
         ...layout,
@@ -1101,6 +1131,7 @@ export function parsePdfStatementPages(
 
     // 2. Capture Brought Forward / Opening Balance to seed running-balance sign verification
     if (BROUGHT_FORWARD_RE.test(row.text)) {
+      if (pendingEntry) return rejectIncomplete();
       const moneyTokens = row.cells
         .map((cell) => ({ cell, money: parsePdfMoneyCell(cell.text) }))
         .filter((x): x is { cell: PdfCell; money: ParsedMoneyToken } => x.money !== null);
@@ -1116,6 +1147,7 @@ export function parsePdfStatementPages(
 
     // 3. Skip non-transaction summary / header / footer rows
     if (NON_TRANSACTION_ROW_RE.test(row.text)) {
+      if (pendingEntry) return rejectIncomplete();
       pendingEntry = null;
       continue;
     }
@@ -1129,6 +1161,16 @@ export function parsePdfStatementPages(
       const cell = row.cells[c];
       // If we know where the Date column is, don't parse dates far to the right inside the description
       if (c > 0 && layout.dateX !== undefined && cell.x > layout.dateX + 70) break;
+      // The low-level helper keeps its legacy UK interpretation for callers;
+      // importing a statement must not silently choose between UK and US dates.
+      if (isAmbiguousNumericDate(cell.text)) {
+        return {
+          transactions: [],
+          warnings: [
+            'An ambiguous numeric PDF date needs a confirmed day/month order. No rows from this PDF were staged; export CSV/OFX or use an unambiguous date format.',
+          ],
+        };
+      }
       const parsedDate = parseLeadingPdfDate(cell.text);
       if (parsedDate) {
         if (parsedDate.isoDate) {
@@ -1139,6 +1181,14 @@ export function parsePdfStatementPages(
             parsedDate.yearless.month,
             dateContext
           );
+          if (!rowDate) {
+            return {
+              transactions: [],
+              warnings: [
+                'A yearless PDF transaction date is outside the statement period or invalid. No rows from this PDF were staged; verify the period and reselect the PDF.',
+              ],
+            };
+          }
           if (rowDate) usedYearlessInference = true;
         }
         if (rowDate) {
@@ -1194,7 +1244,13 @@ export function parsePdfStatementPages(
     // 6. Handle rows WITHOUT any monetary values
     if (moneyCells.length === 0) {
       // Case A: Date + description on line 1, amount expected on line 2
-      if (rowDate && rowDescription && !BOILERPLATE_CONTINUATION_RE.test(rowDescription)) {
+      if (
+        rowDate &&
+        rowDescription &&
+        (sawTableHeader || transactions.length > 0) &&
+        !BOILERPLATE_CONTINUATION_RE.test(rowDescription)
+      ) {
+        if (pendingEntry) return rejectIncomplete();
         currentDate = rowDate;
         pendingEntry = {
           date: rowDate,
@@ -1246,6 +1302,8 @@ export function parsePdfStatementPages(
     let combinedDesc = rowDescription;
     let effectiveCode = paymentCode;
 
+    if (rowDate && pendingEntry) return rejectIncomplete();
+
     if (!effectiveDate && pendingEntry) {
       effectiveDate = pendingEntry.date;
       effectiveCode = pendingEntry.paymentCode ?? paymentCode;
@@ -1290,6 +1348,10 @@ export function parsePdfStatementPages(
 
     if (txMoneyEntries.length === 0) continue;
 
+    if (txMoneyEntries.filter((entry) => entry.money.absValue > 0).length > 1) {
+      return rejectIncomplete();
+    }
+
     // Pick primary transaction money cell (if 2 non-balance money cells appear, use the non-zero one)
     const chosenEntry =
       txMoneyEntries.find((m) => m.money.absValue > 0) ?? txMoneyEntries[0];
@@ -1304,8 +1366,7 @@ export function parsePdfStatementPages(
       if (effectiveCode) {
         combinedDesc = `Bank Transaction (${effectiveCode})`;
       } else {
-        if (rowBalance !== null) prevBalance = rowBalance;
-        continue;
+        return rejectIncomplete();
       }
     }
 
@@ -1317,11 +1378,23 @@ export function parsePdfStatementPages(
       prevBalance,
       layout,
       paymentCode: effectiveCode,
-      description: combinedDesc,
     });
+    if (signedAmount === null) {
+      return {
+        transactions: [],
+        warnings: [
+          'A PDF amount has no verifiable direction or conflicts with the running balance. No rows from this PDF were staged; export CSV/OFX or use a statement with debit/credit columns.',
+        ],
+      };
+    }
 
     if (rowBalance !== null) {
       prevBalance = rowBalance;
+    } else if (prevBalance !== null) {
+      // Some statements leave the balance cell blank on intermediate rows.
+      // Carry the verified signed movement so the next printed balance is
+      // checked against the complete sequence, not a stale earlier balance.
+      prevBalance = Math.round((prevBalance + signedAmount) * 100) / 100;
     }
 
     const txCurrency = chosenEntry.money.currency ?? docCurrency;
@@ -1341,21 +1414,7 @@ export function parsePdfStatementPages(
     });
   }
 
-  // Guard against non-statement PDFs mixed into a statements folder (e.g. utility bills, school letters)
-  const looksLikeNonStatementDoc =
-    !sawTableHeader &&
-    /\b(meter\s+reading|kwh|standing\s+charge|electricity\s+supply|gas\s+supply|dear\s+parent|headteacher|school\s+term|council\s+tax\s+bill)\b/i.test(
-      fullDocText
-    );
-
-  if (looksLikeNonStatementDoc) {
-    return {
-      transactions: [],
-      warnings: [
-        'Skipped (appears to be a utility bill or letter rather than a bank statement).',
-      ],
-    };
-  }
+  if (pendingEntry) return rejectIncomplete();
 
   if (transactions.length === 0) {
     warnings.push(
@@ -1370,87 +1429,4 @@ export function parsePdfStatementPages(
   }
 
   return { transactions, warnings };
-}
-
-/**
- * Extracts text spans with (x, y, width, height) coordinates from a PDF ArrayBuffer
- * completely locally inside the user's browser using pdfjs-dist.
- */
-export async function extractPdfPagesFromBuffer(
-  buffer: ArrayBuffer
-): Promise<PdfExtractedPage[]> {
-  const [pdfjsLib, workerUrlModule] = await Promise.all([
-    import('pdfjs-dist'),
-    import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-  ]);
-
-  if (pdfjsLib.GlobalWorkerOptions) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrlModule.default;
-  }
-
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(buffer),
-    useSystemFonts: true,
-  });
-
-  const pdfDoc = await loadingTask.promise;
-  const pages: PdfExtractedPage[] = [];
-
-  try {
-    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-      const page = await pdfDoc.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const spans: PdfTextSpan[] = [];
-
-      for (const item of textContent.items) {
-        if (!('str' in item)) continue;
-        const text = item.str;
-        if (!text || !text.trim()) continue;
-        const transform = item.transform ?? [1, 0, 0, 10, 0, 0];
-        const x = Number(transform[4] ?? 0);
-        const y = Number(transform[5] ?? 0);
-        const height = Math.abs(Number(item.height || transform[3] || 10));
-        const width = Math.abs(Number(item.width || text.length * height * 0.5));
-        spans.push({ text, x, y, width, height });
-      }
-
-      pages.push({ pageNumber: pageNum, spans });
-    }
-  } finally {
-    await pdfDoc.cleanup();
-    await loadingTask.destroy();
-  }
-
-  return pages;
-}
-
-/**
- * High-level browser helper: reads a PDF File locally and parses its bank transactions.
- */
-export async function parsePdfStatementFile(
-  file: File,
-  displayPath: string,
-  options: PdfParseOptions = {}
-): Promise<ParsedStatementResult> {
-  try {
-    const buffer = await file.arrayBuffer();
-    const pages = await extractPdfPagesFromBuffer(buffer);
-    return parsePdfStatementPages(pages, displayPath, options);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (/password/i.test(message)) {
-      return {
-        transactions: [],
-        warnings: [
-          'This PDF is password-protected. Please unlock/print-to-PDF without a password or export CSV/OFX from your bank.',
-        ],
-      };
-    }
-    return {
-      transactions: [],
-      warnings: [
-        'Unable to read this PDF file locally. Ensure it is a valid text-based bank statement PDF or export CSV/OFX from your bank.',
-      ],
-    };
-  }
 }

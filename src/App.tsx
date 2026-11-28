@@ -59,6 +59,7 @@ import {
   shredLocalVault,
 } from './utils/cryptoVault';
 import { generateSample14MonthData } from './utils/sampleData';
+import { createEmptyVault } from './utils/emptyVault';
 import {
   applyCategorySuggestions,
   evaluateAdvancedRules,
@@ -376,7 +377,7 @@ export default function App() {
         if (!active) return;
 
         if (!stored) {
-          const initial = generateSample14MonthData();
+          const initial = createEmptyVault();
           await savePlaintextLocalVault(initial);
           resetPresent(initial);
         } else if (stored.mode === 'encrypted_aes_gcm' && stored.envelope) {
@@ -424,12 +425,12 @@ export default function App() {
             resetPresent(loaded);
           }
         } else {
-          const fallback = generateSample14MonthData();
+          const fallback = createEmptyVault();
           resetPresent(fallback);
         }
       } catch {
         if (active) {
-          resetPresent(generateSample14MonthData());
+          resetPresent(createEmptyVault());
         }
       } finally {
         if (active) setLoading(false);
@@ -1019,7 +1020,7 @@ export default function App() {
       incoming: Transaction[],
       metas: StatementImportMeta[],
       replaceExisting: boolean
-    ): Promise<{ added: number; skipped: number }> => {
+    ): Promise<{ added: number; skipped: number; legacySampleSettingsReview?: boolean }> => {
       if (!payload) throw new Error('Local vault is unavailable');
       return commitStatementImport(
         payload,
@@ -1027,7 +1028,13 @@ export default function App() {
         metas,
         replaceExisting,
         (next, label) =>
-          persistPayload(next, { label, saveBeforeHistory: true })
+          persistPayload(next, {
+            label,
+            saveBeforeHistory: true,
+            // Do not leave fictional sample snapshots reachable via Undo after
+            // the first real statement replaces the demonstration ledger.
+            resetHistory: payload.isSampleData,
+          })
       );
     },
     [payload, persistPayload]
@@ -1254,25 +1261,7 @@ export default function App() {
     setLatestEnvelope(null);
     setLockedEnvelope(null);
     setHistoryBanner(null);
-    const empty: VaultPayload = {
-      ...generateSample14MonthData(),
-      isSampleData: false,
-      exchangeRates: { ...DEFAULT_EXCHANGE_RATES },
-      transactions: [],
-      imports: [],
-      recurringActions: {},
-      recommendationOverrides: {},
-      categoryRules: [],
-      advancedRules: [],
-      debts: [],
-      plannerState: {
-        commitmentDeclaration: '',
-        commitmentSignedName: '',
-        commitmentUpdatedAt: '',
-        struggles: [],
-        plannerGoals: [],
-      },
-    };
+    const empty = createEmptyVault();
     resetPresent(empty);
     await savePlaintextLocalVault(empty);
   }, [resetPresent]);
@@ -1294,7 +1283,7 @@ export default function App() {
         onUnlock={handleUnlockVault}
         onResetVault={async () => {
           await shredLocalVault();
-          const fresh = generateSample14MonthData();
+          const fresh = createEmptyVault();
           await savePlaintextLocalVault(fresh);
           setLockedEnvelope(null);
           setLatestEnvelope(null);

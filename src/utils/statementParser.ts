@@ -9,6 +9,7 @@ import {
   type SpendingClass,
   type Transaction,
 } from '../types/finance';
+import { redactImportDisplayText } from './displayPrivacy';
 
 const VALID_CURRENCIES = new Set<string>(Object.keys(CURRENCY_CONFIG));
 
@@ -454,8 +455,8 @@ export function exportTransactionsToCsv(
       const merchant = escapeCsvText(tx.merchant);
       const desc = escapeCsvText(tx.description);
       const catLabel = escapeCsvText(CATEGORIES[tx.category]?.label ?? tx.category);
-      const acc = escapeCsvText(tx.accountName);
-      const source = escapeCsvText(tx.sourceFile ?? '');
+      const acc = escapeCsvText(redactImportDisplayText(tx.accountName));
+      const source = escapeCsvText(redactImportDisplayText(tx.sourceFile ?? ''));
       const notes = escapeCsvText(tx.notes ?? '');
       const ccy = tx.currency ?? defaultCurrency;
       const displayAmt = getTransactionDisplayAmount(tx, defaultCurrency, exchangeRates);

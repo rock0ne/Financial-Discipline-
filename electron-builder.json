@@ -9,8 +9,10 @@
     "dist/**/*",
     "electron/**/*",
     "public/pwa-512x512.png",
-    "package.json"
+    "package.json",
+    "!node_modules/**/*"
   ],
+  "npmRebuild": false,
   "extraMetadata": {
     "main": "electron/main.cjs"
   },

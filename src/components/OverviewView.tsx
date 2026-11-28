@@ -125,10 +125,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     return (
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 md:p-12 text-center max-w-2xl mx-auto my-8">
         <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-          Upload 12 months of bank statements to begin
+          Import bank statements to begin
         </h2>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-          Every statement is parsed and analyzed locally inside your device. Nothing leaves your computer or phone.
+          Statement files are parsed locally on this device. More months improve forecasts; AI Advisor is separate and optional.
         </p>
         <div className="mt-6 flex items-center justify-center gap-3">
           <button
@@ -139,6 +139,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             Import Bank Statements
           </button>
         </div>
+        <button type="button" onClick={() => onNavigate('vault')} className="mt-4 text-xs text-teal-700 dark:text-teal-400 underline">
+          Prefer to explore first? Load the optional fictional sample in Vault &amp; Settings.
+        </button>
       </div>
     );
   }

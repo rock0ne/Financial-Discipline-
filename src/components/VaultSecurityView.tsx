@@ -35,6 +35,7 @@ import {
   type ProviderAvailabilityMap,
 } from '../utils/aiSettings';
 import type { DocumentSaveResult } from '../utils/documentSave';
+import { redactImportDisplayText } from '../utils/displayPrivacy';
 
 interface VaultSecurityViewProps {
   isEncrypted: boolean;
@@ -121,6 +122,7 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
   const [importPass, setImportPass] = useState('');
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null);
   const [confirmShred, setConfirmShred] = useState(false);
+  const [confirmSample, setConfirmSample] = useState(false);
   const [importSortOrder, setImportSortOrder] = useState<'newest' | 'oldest'>('newest');
   const [confirmDeleteBatchId, setConfirmDeleteBatchId] = useState<string | null>(null);
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
@@ -167,7 +169,7 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
       const res = await onDeleteImportBatch(importId);
       setConfirmDeleteBatchId(null);
       setStatusMsg(
-        `Deleted import batch "${res.fileName}" and removed ${res.removedTransactions} linked transaction${
+        `Deleted import batch "${redactImportDisplayText(res.fileName)}" and removed ${res.removedTransactions} linked transaction${
           res.removedTransactions === 1 ? '' : 's'
         } from your local vault.`
       );
@@ -291,7 +293,7 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
             AI Financial Assistant
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            Savings recommendations, spending explanations, and Cash ISA guidance from your local summary, with Claude, ChatGPT, or Gemini. It is off until you turn it on. When you use it, only the anonymized summary you choose is sent to that provider under its terms. Your raw bank statements, merchant names, and notes are never sent.
+            Savings recommendations, spending explanations, and Cash ISA guidance from your local summary, with Claude, ChatGPT, or Gemini. It is off until you turn it on. The generated summary omits raw statements and merchant names, but your typed question is also sent to the provider. Review it for private details before sending.
           </p>
         </div>
 
@@ -747,7 +749,7 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
                             <FileSpreadsheet className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-slate-900 dark:text-slate-100 break-all">
-                                {imp.fileName}
+                                {redactImportDisplayText(imp.fileName)}
                               </p>
                               {imp.duplicatesSkipped > 0 && (
                                 <p className="mt-0.5 text-[11px] font-mono-num text-slate-500 dark:text-slate-400">
@@ -829,7 +831,7 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-slate-900 dark:text-slate-100 break-all">
-                          {imp.fileName}
+                          {redactImportDisplayText(imp.fileName)}
                         </p>
                         <p className="mt-0.5 text-xs font-mono-num text-slate-500 dark:text-slate-400">
                           Imported {formatImportTimestamp(imp.importedAt)}
@@ -1037,21 +1039,36 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
                 Local Ledger Storage ({transactionCount} rows · {isSampleData ? 'Sample' : 'Custom'})
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Restore the 14-month sample dataset or permanently shred all local records from IndexedDB
+                Fictional sample data is optional. Loading it replaces the current ledger; shredding removes all local records.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={async () => {
-                  await onResetSampleData();
-                  setStatusMsg('Restored the 14-month sample household bank statements.');
-                }}
-                className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Load 14-Month Sample
-              </button>
+              {!confirmSample ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmSample(true)}
+                  className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Load Fictional Sample
+                </button>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-amber-700 dark:text-amber-300">This replaces your current ledger and settings.</span>
+                  <button type="button" onClick={() => setConfirmSample(false)} className="px-2 py-2 rounded-lg border border-slate-300 dark:border-slate-700">Cancel</button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onResetSampleData();
+                      setConfirmSample(false);
+                      setStatusMsg('Loaded fictional 14-month sample data.');
+                    }}
+                    className="px-2 py-2 rounded-lg border border-amber-500 text-amber-800 dark:text-amber-300"
+                  >
+                    Replace with Sample
+                  </button>
+                </div>
+              )}
 
               {!confirmShred ? (
                 <button

@@ -1,55 +1,54 @@
-# Installing & Building Clearledger for Windows and Android
+# Clearledger: Windows and Android build handoff
 
-Clearledger runs 100% locally with AES-256-GCM encrypted on-device storage. You have two ways to run it on **Windows** and **Android**:
+Clearledger's ledger, statement parser and forecasts run on-device. A new vault starts empty. The fictional sample is an explicit opt-in under **Vault & Settings**; a normal sample ledger is replaced on real import. In older mixed vaults, identifiable sample rows/imports are removed, while ambiguous edited settings are preserved with an in-app review warning. Do not commit statement PDFs, local vaults, debug logs or signing keys. A successful build is not evidence that a bank PDF was parsed correctly: review dates, signed amounts, currency and account separation before confirming an import.
 
----
+## Prerequisites
 
-## Option 1: Install Right Now (Zero Build Tools Needed — Offline PWA)
+- Node.js 22.13+ and pnpm 11.25.0. Use the committed `pnpm-lock.yaml` with `pnpm install --frozen-lockfile`.
+- For Windows packaging: Windows x64. The Electron and electron-builder versions are pinned in `package.json`.
+- For Android packaging: JDK 21 and Android SDK platform/build tools for API 36. The `android/` project is already tracked; **do not run `cap add android`**.
+- Build each target from a clean source revision. `dist/`, `release/`, Android build output and `node_modules/` are ignored and are not release source.
 
-Clearledger is configured as an offline-capable **Progressive Web App (PWA)** with full service-worker caching.
+Before either native build, run `pnpm test` and `pnpm lint`. Do not package if either fails.
 
-### Windows (Edge or Chrome)
-1. Open the Clearledger app URL directly in Microsoft Edge or Google Chrome (outside the editor preview frame).
-2. Click **Install App** in the top header (or the install icon in the browser address bar).
-3. Pin Clearledger to your Windows Start Menu or Taskbar. It launches in its own standalone window and works completely offline.
+## Windows Electron (PowerShell)
 
-### Android (Chrome)
-1. Open the Clearledger app URL in **Chrome for Android**.
-2. Tap **Install App** in the top header (or Chrome's **⋮ menu → Install app**).
-3. Clearledger installs onto your home screen and app drawer with full-screen standalone display and offline vault storage.
+From the repository root:
 
----
-
-## Option 2: Build Native Windows (`.exe`) & Android (`.apk`) Installers Locally
-
-Download or clone this project onto your Windows PC (requires **Node.js 20+**).
-
-### 1. Install Project Dependencies
-```bash
-npm install
+```powershell
+pnpm install --frozen-lockfile
+$env:ELECTRON_BUILD = 'true'
+pnpm exec vite build
+Remove-Item Env:ELECTRON_BUILD
+$env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+pnpm exec electron-builder --win --config electron-builder.json --publish never
+Remove-Item Env:CSC_IDENTITY_AUTO_DISCOVERY
+Get-FileHash 'release\Clearledger Setup 0.1.1.exe' -Algorithm SHA256
+Get-FileHash 'release\Clearledger 0.1.1.exe' -Algorithm SHA256
 ```
 
-### 2. Build Native Windows Desktop App (`.exe` Installer + Portable `.exe`)
-Install Electron & electron-builder locally on your Windows machine, then build:
-```bash
-npm install -D electron electron-builder
-ELECTRON_BUILD=true npx vite build
-npx electron-builder --win --config electron-builder.json
-```
-*(In PowerShell on Windows, run `$env:ELECTRON_BUILD="true"; npx vite build; npx electron-builder --win --config electron-builder.json`.)*
+This produces an NSIS installer and portable executable in `release/`. They are **unsigned** unless the owner separately configures a trusted Windows code-signing certificate. OpenSSL alone cannot make a public Windows publisher identity trusted. Do not publish an unsigned preview as a signed release. The app loads its bundled `dist/index.html`, not a development server; online-only optional features must fail clearly when unavailable.
 
-Your outputs will appear in `release/`:
-- `Clearledger Setup <version>.exe` (Windows installer with Start Menu & Desktop shortcuts)
-- `Clearledger <version>.exe` (Single-file portable Windows executable)
+## Android Capacitor (PowerShell)
 
-### 3. Build Native Android App (`.apk` / `.aab`)
-Requires **Android Studio** (with Android SDK & JDK 17+):
-```bash
-npm install @capacitor/core @capacitor/android
-npm install -D @capacitor/cli
-npm run build
-npx cap add android
-npx cap sync android
-npx cap open android
+From the same repository root, rebuild the web assets for Android before syncing (the Windows build uses a different asset base):
+
+```powershell
+$env:CAPACITOR_BUILD = 'true'
+pnpm exec vite build
+Remove-Item Env:CAPACITOR_BUILD
+pnpm exec cap sync android
+Push-Location android
+.\gradlew.bat assembleDebug assembleRelease --offline
+Pop-Location
+Get-FileHash 'android\app\build\outputs\apk\debug\app-debug.apk' -Algorithm SHA256
+Get-FileHash 'android\app\build\outputs\apk\release\app-release-unsigned.apk' -Algorithm SHA256
 ```
-In **Android Studio**, choose **Build → Build Bundle(s) / APK(s) → Build APK(s)** (or run `cd android && ./gradlew assembleDebug` to generate `android/app/build/outputs/apk/debug/app-debug.apk`).
+
+If dependencies are not cached, remove only Gradle's `--offline` option and review the downloaded dependency sources. On Rockson's WSL setup, JDK 21 and the Android SDK are under `/root/.local/`; the Gradle wrapper must have LF line endings to run under Linux (`.gitattributes` enforces this on checkout).
+
+`assembleDebug` creates a debug-key APK with application ID `app.clearledger.finance.debug`, isolated from the installed production app and its data. `assembleRelease` creates an **unsigned** APK with application ID `app.clearledger.finance` and version code 2/version name 0.1.1. The owner signs the exact frozen release APK privately, then verifies its certificate, package/version, payload identity and SHA-256. Never commit the keystore or signing password.
+
+## Browser PWA
+
+`pnpm build` makes a separate service-worker-enabled PWA bundle. Install from a browser origin after loading it once online, then test the cached core offline. The PWA, Electron and Capacitor builds have different service-worker and URL-base behavior; do not reuse one target's `dist/` for another target.

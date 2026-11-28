@@ -4,15 +4,21 @@ import type {
   VaultPayload,
 } from '../types/finance';
 import { buildDedupKey } from './statementParser';
+import { createEmptyVault } from './emptyVault';
+import { stripLegacySampleArtifacts } from './sampleBoundary';
+import { redactImportDisplayText } from './displayPrivacy';
 
 export interface ImportCommitResult {
   added: number;
   skipped: number;
+  /** A legacy mixed vault had identifiable sample rows removed; ambiguous settings were retained. */
+  legacySampleSettingsReview?: boolean;
 }
 
 export function isValidPdfAccountLabel(label: string | undefined): boolean {
   const value = label?.trim() ?? '';
-  return value.length >= 2 && value.length <= 64 && !/[|\r\n]/.test(value);
+  return value.length >= 2 && value.length <= 64 && !/[|\r\n]/.test(value) &&
+    redactImportDisplayText(value) === value;
 }
 
 export function applyConfirmedPdfAccountLabels(
@@ -45,7 +51,17 @@ export async function commitStatementImport(
   replaceExisting: boolean,
   save: (next: VaultPayload, label: string) => Promise<void>
 ): Promise<ImportCommitResult> {
-  const baseTx = replaceExisting ? [] : payload.transactions;
+  // Sample rows must never be merged into a real bank import, even if a stale
+  // client sends replaceExisting=false.
+  const replaceLedger = replaceExisting || payload.isSampleData;
+  const basePayload = payload.isSampleData
+    ? {
+        ...createEmptyVault(),
+        currency: payload.currency,
+        exchangeRates: payload.exchangeRates,
+      }
+    : stripLegacySampleArtifacts(payload);
+  const baseTx = replaceLedger ? [] : basePayload.transactions;
   const existingCounts = new Map<string, number>();
   for (const tx of baseTx) {
     const key = buildDedupKey(tx);
@@ -111,13 +127,19 @@ export async function commitStatementImport(
     b.date.localeCompare(a.date)
   );
   const next: VaultPayload = {
-    ...payload,
+    ...basePayload,
     isSampleData: false,
     transactions: merged,
-    imports: replaceExisting ? enrichedMetas : [...enrichedMetas, ...payload.imports],
+    imports: replaceLedger ? enrichedMetas : [...enrichedMetas, ...basePayload.imports],
   };
   const label = `Imported ${uniqueIncoming.length} transaction${uniqueIncoming.length === 1 ? '' : 's'}`;
   // The callback must resolve only after the local vault write is durable.
   await save(next, label);
-  return { added: uniqueIncoming.length, skipped };
+  return {
+    added: uniqueIncoming.length,
+    skipped,
+    ...(basePayload !== payload && !payload.isSampleData
+      ? { legacySampleSettingsReview: true }
+      : {}),
+  };
 }
