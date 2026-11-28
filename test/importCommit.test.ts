@@ -4,6 +4,7 @@ import { generateSample14MonthData } from '../src/utils/sampleData';
 import {
   applyConfirmedPdfAccountLabels,
   commitStatementImport,
+  effectiveReplaceExisting,
   hasImportReceipt,
   isValidPdfAccountLabel,
 } from '../src/utils/importCommit';
@@ -38,6 +39,51 @@ function meta(accountName: string): StatementImportMeta {
 }
 
 describe('confirmed statement import', () => {
+  it('forces replacement only while the sample ledger is active', () => {
+    assert.equal(effectiveReplaceExisting(true, false), true);
+    assert.equal(effectiveReplaceExisting(true, true), true);
+    assert.equal(effectiveReplaceExisting(false, false), false);
+    assert.equal(effectiveReplaceExisting(false, true), true);
+  });
+
+  it('always removes fictional transactions and import receipts on the first real import, even if merge was requested', async () => {
+    const sample = generateSample14MonthData();
+    assert.equal(sample.isSampleData, true);
+    assert.ok(sample.transactions.length > 0);
+    assert.ok(sample.imports.length > 0);
+    const firstReal = transaction('account-a', 'first-real');
+    const firstMeta = meta('account-a');
+    let saved: VaultPayload = sample;
+
+    const firstResult = await commitStatementImport(
+      sample,
+      [firstReal],
+      [firstMeta],
+      false,
+      async (next) => { saved = next; }
+    );
+    assert.deepEqual(firstResult, { added: 1, skipped: 0 });
+    assert.equal(saved.isSampleData, false);
+    assert.deepEqual(saved.transactions, [firstReal]);
+    assert.deepEqual(saved.imports, [firstMeta]);
+    assert.equal(hasImportReceipt(saved, [firstMeta]), true);
+    assert.equal(hasImportReceipt(saved, [sample.imports[0]]), false);
+    assert.equal(saved.plannerState, sample.plannerState); // unrelated vault work is retained
+
+    const secondReal = transaction('account-b', 'second-real');
+    const secondMeta = meta('account-b');
+    const secondResult = await commitStatementImport(
+      saved,
+      [secondReal],
+      [secondMeta],
+      false,
+      async (next) => { saved = next; }
+    );
+    assert.deepEqual(secondResult, { added: 1, skipped: 0 });
+    assert.deepEqual(new Set(saved.transactions.map((tx) => tx.id)), new Set(['first-real', 'second-real']));
+    assert.deepEqual(new Set(saved.imports.map((entry) => entry.id)), new Set([firstMeta.id, secondMeta.id]));
+  });
+
   it('does not acknowledge success before the local vault write resolves', async () => {
     const payload = { ...generateSample14MonthData(), transactions: [], imports: [] };
     let finishSave: (() => void) | undefined;
@@ -79,6 +125,7 @@ describe('confirmed statement import', () => {
   it('deduplicates per account rather than discarding a matching transaction in another account', async () => {
     const payload = {
       ...generateSample14MonthData(),
+      isSampleData: false,
       transactions: [transaction('account-a', 'existing')],
       imports: [meta('account-a')],
     };
@@ -133,7 +180,7 @@ describe('confirmed statement import', () => {
       [{ ...transaction('statement (1)', 'new'), sourceFile: 'statement (1).pdf', importBatchId: 'renamed' }],
       { renamed: 'Current Account A' }
     );
-    const payload = { ...generateSample14MonthData(), transactions: [original], imports: [] };
+    const payload = { ...generateSample14MonthData(), isSampleData: false, transactions: [original], imports: [] };
     const result = await commitStatementImport(
       payload, renamed, [{ ...meta('statement (1)'), id: 'renamed', fileName: 'statement (1).pdf' }],
       false, async (next) => { assert.equal(next.transactions.length, 1); }

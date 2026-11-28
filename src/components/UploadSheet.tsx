@@ -23,6 +23,7 @@ import { exportTransactionsToCsv, parseStatementContent } from '../utils/stateme
 import { parsePdfStatementFile } from '../utils/pdfStatementReader';
 import { pickNativeStatementFolder } from '../utils/nativeStatementFolder';
 import { generateSample14MonthData } from '../utils/sampleData';
+import { effectiveReplaceExisting } from '../utils/importCommit';
 import {
   applyCategorySuggestions,
   suggestCategoryMappings,
@@ -177,6 +178,12 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
   const [lastFromFolder, setLastFromFolder] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Once the first real statement replaces the sample, make later real imports
+  // mergeable by default. A sample ledger itself never offers a merge choice.
+  useEffect(() => {
+    setReplaceExisting(isSampleData);
+  }, [isSampleData]);
 
   // Browser/Windows folder selection; Android uses the native read-only system picker.
   useEffect(() => {
@@ -377,7 +384,7 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
       const { added, skipped } = await onCommitImport(
         finalizedTransactions,
         stagedMeta,
-        replaceExisting
+        effectiveReplaceExisting(isSampleData, replaceExisting)
       );
       setResultBanner(
         `Imported ${added} transaction${added === 1 ? '' : 's'} locally${
@@ -546,16 +553,19 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
             </div>
           </div>
 
-          {/* Merge vs Replace Option */}
-          <label className="flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+          {/* Merge is available only after the sample has been replaced by real data. */}
+          <label className={`flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300 ${isSampleData ? '' : 'cursor-pointer'}`}>
             <input
               type="checkbox"
-              checked={replaceExisting}
+              checked={effectiveReplaceExisting(isSampleData, replaceExisting)}
+              disabled={isSampleData}
               onChange={(e) => setReplaceExisting(e.target.checked)}
-              className="mt-0.5 w-4 h-4 rounded accent-teal-700"
+              className="mt-0.5 w-4 h-4 rounded accent-teal-700 disabled:opacity-70"
             />
             <span>
-              <strong>Replace existing ledger</strong> (recommended when replacing the built-in 14-month sample with your own bank statements; uncheck to merge additional months).
+              <strong>Replace existing ledger</strong>{isSampleData
+                ? ' — required for the first real import. All built-in sample transactions and sample import records will be removed; merge becomes available afterward.'
+                : ' — optional. Leave unchecked to merge additional real statements.'}
             </span>
           </label>
 
