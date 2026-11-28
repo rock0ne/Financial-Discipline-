@@ -21,6 +21,22 @@ export function isValidPdfAccountLabel(label: string | undefined): boolean {
     redactImportDisplayText(value) === value;
 }
 
+export type ImportReviewBlocker = 'pdf_labels' | 'pdf_review' | 'partial_import';
+
+export function getImportReviewBlockers(state: {
+  pdfCount: number;
+  missingPdfLabels: number;
+  reviewedPdf: boolean;
+  failedFiles: number;
+  acceptPartial: boolean;
+}): ImportReviewBlocker[] {
+  const blockers: ImportReviewBlocker[] = [];
+  if (state.pdfCount > 0 && state.missingPdfLabels > 0) blockers.push('pdf_labels');
+  if (state.pdfCount > 0 && !state.reviewedPdf) blockers.push('pdf_review');
+  if (state.failedFiles > 0 && !state.acceptPartial) blockers.push('partial_import');
+  return blockers;
+}
+
 export function applyConfirmedPdfAccountLabels(
   transactions: Transaction[],
   labelsByBatchId: Record<string, string>

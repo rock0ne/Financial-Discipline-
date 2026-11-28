@@ -5,6 +5,7 @@ import { createEmptyVault } from '../src/utils/emptyVault';
 import {
   applyConfirmedPdfAccountLabels,
   commitStatementImport,
+  getImportReviewBlockers,
   hasImportReceipt,
   isValidPdfAccountLabel,
 } from '../src/utils/importCommit';
@@ -39,6 +40,22 @@ function meta(accountName: string): StatementImportMeta {
 }
 
 describe('confirmed statement import', () => {
+  it('explains every PDF review gate without treating a parsed row count as consent', () => {
+    const pending = {
+      pdfCount: 8,
+      missingPdfLabels: 8,
+      reviewedPdf: false,
+      failedFiles: 0,
+      acceptPartial: false,
+    };
+    assert.deepEqual(getImportReviewBlockers(pending), ['pdf_labels', 'pdf_review']);
+    assert.deepEqual(getImportReviewBlockers({ ...pending, missingPdfLabels: 0 }), ['pdf_review']);
+    assert.deepEqual(getImportReviewBlockers({ ...pending, missingPdfLabels: 0, reviewedPdf: true }), []);
+    assert.deepEqual(getImportReviewBlockers({ ...pending, missingPdfLabels: 0, reviewedPdf: true, failedFiles: 1 }), ['partial_import']);
+    assert.deepEqual(getImportReviewBlockers({ ...pending, missingPdfLabels: 0, reviewedPdf: true, failedFiles: 1, acceptPartial: true }), []);
+    assert.deepEqual(getImportReviewBlockers({ ...pending, pdfCount: 0, missingPdfLabels: 0 }), []);
+  });
+
   it('does not acknowledge success before the local vault write resolves', async () => {
     const payload = { ...generateSample14MonthData(), transactions: [], imports: [] };
     let finishSave: (() => void) | undefined;

@@ -23,6 +23,7 @@ import { parsePdfStatementFile } from '../utils/pdfStatementReader';
 import { redactImportDisplayText } from '../utils/displayPrivacy';
 import {
   applyConfirmedPdfAccountLabels,
+  getImportReviewBlockers,
   isValidPdfAccountLabel,
 } from '../utils/importCommit';
 import { generateSample14MonthData } from '../utils/sampleData';
@@ -189,6 +190,8 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
   const [lastFromFolder, setLastFromFolder] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const pdfReviewRef = useRef<HTMLDivElement | null>(null);
+  const partialReviewRef = useRef<HTMLLabelElement | null>(null);
   const busyRef = useRef(false);
   const uncertainRef = useRef(false);
 
@@ -248,9 +251,31 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
 
   const pdfMetas = stagedMeta.filter((meta) => meta.fileName.toLowerCase().endsWith('.pdf'));
   const pdfPreviewRows = stagedTransactions.filter((tx) => tx.sourceFile?.toLowerCase().endsWith('.pdf'));
-  const pdfLabelsValid = pdfMetas.every((meta) =>
-    isValidPdfAccountLabel(pdfAccountLabels[meta.id])
-  );
+  const missingPdfLabels = pdfMetas.filter((meta) =>
+    !isValidPdfAccountLabel(pdfAccountLabels[meta.id])
+  ).length;
+  const pdfLabelsValid = missingPdfLabels === 0;
+  const importReviewBlockers = getImportReviewBlockers({
+    pdfCount: pdfMetas.length,
+    missingPdfLabels,
+    reviewedPdf,
+    failedFiles,
+    acceptPartial,
+  });
+  const importReviewMessage = [
+    ...(importReviewBlockers.includes('pdf_labels')
+      ? [`label ${missingPdfLabels} PDF${missingPdfLabels === 1 ? '' : 's'}`]
+      : []),
+    ...(importReviewBlockers.includes('pdf_review') ? ['confirm PDF row review'] : []),
+    ...(importReviewBlockers.includes('partial_import') ? ['confirm partial import'] : []),
+  ].join('; ');
+
+  const jumpToRequiredReview = () => {
+    const target = importReviewBlockers.includes('pdf_labels') || importReviewBlockers.includes('pdf_review')
+      ? pdfReviewRef.current
+      : partialReviewRef.current;
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   if (!open) return null;
 
@@ -420,8 +445,7 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
     if (
       stagedTransactions.length === 0 || committing || scanning || busyRef.current ||
       uncertainRef.current || saveUncertain ||
-      (pdfMetas.length > 0 && (!reviewedPdf || !pdfLabelsValid)) ||
-      (failedFiles > 0 && !acceptPartial)
+      importReviewBlockers.length > 0
     ) return;
     busyRef.current = true;
     setCommitting(true);
@@ -808,7 +832,7 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
           )}
 
           {pdfMetas.length > 0 && (
-            <div className="rounded-xl border border-teal-200 dark:border-teal-900 p-4 space-y-3 text-xs">
+            <div ref={pdfReviewRef} className="rounded-xl border border-teal-200 dark:border-teal-900 p-4 space-y-3 text-xs">
               <div>
                 <p className="font-semibold text-slate-900 dark:text-slate-100">Confirm PDF account and transaction rows</p>
                 <p className="mt-1 text-slate-600 dark:text-slate-400">
@@ -958,7 +982,7 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
           )}
 
           {failedFiles > 0 && stagedTransactions.length > 0 && (
-            <label className="flex items-start gap-2 rounded-lg border border-amber-300 dark:border-amber-800 p-3 text-xs text-amber-900 dark:text-amber-200">
+            <label ref={partialReviewRef} className="flex items-start gap-2 rounded-lg border border-amber-300 dark:border-amber-800 p-3 text-xs text-amber-900 dark:text-amber-200">
               <input type="checkbox" checked={acceptPartial} onChange={(event) => setAcceptPartial(event.target.checked)} className="mt-0.5" />
               <span>{failedFiles} supported file{failedFiles === 1 ? '' : 's'} failed or contained no usable transactions. I understand only the successfully parsed files will be imported.</span>
             </label>
@@ -979,7 +1003,16 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50/70 dark:bg-slate-950/40">
+        <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-slate-50/70 dark:bg-slate-950/40">
+          {stagedTransactions.length > 0 && importReviewBlockers.length > 0 ? (
+            <div className="min-w-0 text-[11px] text-amber-800 dark:text-amber-200">
+              <p id="import-review-requirements" aria-live="polite">Before Analyze: {importReviewMessage}.</p>
+              <button type="button" onClick={jumpToRequiredReview} className="underline underline-offset-2 font-medium cursor-pointer">
+                Go to required review
+              </button>
+            </div>
+          ) : <span />}
+          <div className="flex items-center justify-end gap-2 shrink-0">
           <button
             type="button"
             disabled={scanning || committing}
@@ -991,8 +1024,10 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
           <button
             type="button"
             disabled={stagedTransactions.length === 0 || committing || scanning || saveUncertain ||
-              (pdfMetas.length > 0 && (!reviewedPdf || !pdfLabelsValid)) ||
-              (failedFiles > 0 && !acceptPartial)}
+              importReviewBlockers.length > 0}
+            aria-describedby={stagedTransactions.length > 0 && importReviewBlockers.length > 0
+              ? 'import-review-requirements'
+              : undefined}
             onClick={() => void handleConfirm()}
             className="min-h-[42px] px-5 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-xs font-medium transition-colors cursor-pointer"
           >
@@ -1000,6 +1035,7 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
               ? 'Saving to Vault…'
               : `Analyze ${stagedTransactions.length > 0 ? `${stagedTransactions.length} Rows` : 'Statements'}`}
           </button>
+          </div>
         </div>
       </div>
     </div>
