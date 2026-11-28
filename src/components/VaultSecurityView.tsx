@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   ArrowRight,
   Download,
@@ -53,6 +54,7 @@ interface VaultSecurityViewProps {
   onUpdateAiRatiosOnly: (ratiosOnly: boolean) => void;
   onForgetAiSession: () => void;
   onNavigateAi: () => void;
+  onNavigateReports: () => void;
   onEnableEncryption: (passphrase: string) => Promise<void>;
   onLockVaultNow: () => void;
   onDisableEncryption: () => Promise<void>;
@@ -98,6 +100,7 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
   onUpdateAiRatiosOnly,
   onForgetAiSession,
   onNavigateAi,
+  onNavigateReports,
   onEnableEncryption,
   onLockVaultNow,
   onDisableEncryption,
@@ -116,6 +119,10 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const isNativePackage = Capacitor.isNativePlatform() || Boolean(
+    (window as Window & { clearledgerDesktop?: { isDesktopApp?: boolean } })
+      .clearledgerDesktop?.isDesktopApp
+  );
 
   const [exportPass, setExportPass] = useState('');
   const [importPass, setImportPass] = useState('');
@@ -291,19 +298,34 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
             AI Financial Assistant
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            Savings recommendations, spending explanations, and Cash ISA guidance from your local summary, with Claude, ChatGPT, or Gemini. It is off until you turn it on. When you use it, only the anonymized summary you choose is sent to that provider under its terms. Your raw bank statements, merchant names, and notes are never sent.
+            {isNativePackage
+              ? 'This Windows/Android preview has no on-device AI model or provider connection. AI advice is unavailable; local reports and planning continue to run on your device.'
+              : 'Savings recommendations, spending explanations, and Cash ISA guidance from your local summary, with Claude, ChatGPT, or Gemini. It is off until you turn it on. When you use it, only the anonymized summary you choose is sent to that provider under its terms. Your raw bank statements, merchant names, and notes are never sent.'}
           </p>
         </div>
+
+        {isNativePackage && (
+          <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200 space-y-2">
+            <p>Provider selection is unavailable in this native preview. No AI request can be sent from this app.</p>
+            <button type="button" onClick={onNavigateReports} className="underline font-medium cursor-pointer">
+              Open local Reports (no AI)
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
           <div>
             <label
-              htmlFor="settings-ai-provider"
+              htmlFor={isNativePackage ? undefined : 'settings-ai-provider'}
               className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
             >
               Provider
             </label>
-            <select
+            {isNativePackage ? (
+              <div role="status" className="w-full min-h-[42px] px-3 py-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 text-sm text-slate-600 dark:text-slate-400">
+                Unavailable — no local AI model installed
+              </div>
+            ) : <select
               id="settings-ai-provider"
               value={aiSettings.provider}
               onChange={(e) => {
@@ -321,10 +343,10 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
               <option value="claude">Claude (Anthropic)</option>
               <option value="chatgpt">ChatGPT (OpenAI)</option>
               <option value="gemini">Gemini (Google)</option>
-            </select>
+            </select>}
           </div>
 
-          {aiSettings.provider !== 'off' && (
+          {!isNativePackage && aiSettings.provider !== 'off' && (
             <div>
               <label
                 htmlFor="settings-ai-retention"
@@ -351,7 +373,11 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
           )}
         </div>
 
-        {aiSettings.provider === 'off' ? (
+        {isNativePackage ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Local calculations are available in Reports and the other finance tabs; they are not an AI model.
+          </p>
+        ) : aiSettings.provider === 'off' ? (
           <p className="text-xs text-slate-500 dark:text-slate-400">
             AI advice is currently off. To turn it on, choose a provider above. You can turn it off and forget the session here at any time.
           </p>

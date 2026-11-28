@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import {
   CreditCard,
   FileText,
@@ -201,10 +203,48 @@ const NAV_ITEMS: Array<{
 const MOBILE_PRIMARY_TABS: ActiveTab[] = ['overview', 'cuts', 'reports', 'ai', 'vault'];
 
 export default function App() {
+  const isNativePackage = Capacitor.isNativePlatform() || Boolean(
+    (window as Window & { clearledgerDesktop?: { isDesktopApp?: boolean } })
+      .clearledgerDesktop?.isDesktopApp
+  );
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [timeframe, setTimeframe] = useState<'all' | 12 | 6>('all');
   const [importOpen, setImportOpen] = useState(false);
+  const importOpenRef = useRef(importOpen);
+
+  useEffect(() => {
+    importOpenRef.current = importOpen;
+  }, [importOpen]);
+
+  // Capacitor's Back listener replaces the native default, so preserve both
+  // modal dismissal and normal WebView/root navigation explicitly.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let active = true;
+    let listener: PluginListenerHandle | undefined;
+    void CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (importOpenRef.current) {
+        importOpenRef.current = false;
+        setImportOpen(false);
+      } else if (canGoBack) {
+        window.history.back();
+      } else {
+        void CapacitorApp.exitApp();
+      }
+    }).then((registered) => {
+      if (active) listener = registered;
+      else void registered.remove();
+    }).catch((error) => {
+      console.warn('Android Back listener unavailable', error);
+    });
+
+    return () => {
+      active = false;
+      void listener?.remove();
+    };
+  }, []);
 
   const history = usePayloadHistory();
   const payload = history.payload;
@@ -230,7 +270,10 @@ export default function App() {
     }
   });
 
-  const [aiSettings, setAiSettings] = useState<AiAssistantSettings>(() => loadAiSettings());
+  const [aiSettings, setAiSettings] = useState<AiAssistantSettings>(() => {
+    const saved = loadAiSettings();
+    return isNativePackage ? { ...saved, provider: 'off', expiresAt: null } : saved;
+  });
   const [providerStatus, setProviderStatus] = useState<ProviderAvailabilityMap | null>(null);
   const themeTimerRef = useRef<number | null>(null);
 
@@ -304,6 +347,7 @@ export default function App() {
 
   // Fetch boolean availability of server-side providers once (never any secret values)
   useEffect(() => {
+    if (isNativePackage) return;
     let active = true;
     (async () => {
       try {
@@ -320,7 +364,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isNativePackage]);
 
   // Automatically turn AI provider back to Off when retention window expires
   useEffect(() => {
@@ -340,12 +384,13 @@ export default function App() {
   }, [aiSettings.provider, aiSettings.expiresAt]);
 
   const handleUpdateAiProvider = useCallback((provider: AiProviderSetting) => {
+    if (isNativePackage) return;
     setAiSettings((prev) => ({
       ...prev,
       provider,
       expiresAt: computeExpiryTimestamp(provider, prev.retention),
     }));
-  }, []);
+  }, [isNativePackage]);
 
   const handleUpdateAiRetention = useCallback((retention: AiRetentionOption) => {
     setAiSettings((prev) => ({
@@ -1711,6 +1756,7 @@ export default function App() {
               onUpdateAiRatiosOnly={handleUpdateAiRatiosOnly}
               onForgetAiSession={handleForgetAiSession}
               onNavigateSettings={() => setActiveTab('vault')}
+              onNavigateReports={() => setActiveTab('reports')}
             />
           )}
 
@@ -1762,6 +1808,7 @@ export default function App() {
               onUpdateAiRatiosOnly={handleUpdateAiRatiosOnly}
               onForgetAiSession={handleForgetAiSession}
               onNavigateAi={() => setActiveTab('ai')}
+              onNavigateReports={() => setActiveTab('reports')}
               onEnableEncryption={handleEnableEncryption}
               onLockVaultNow={handleLockVaultNow}
               onDisableEncryption={handleDisableEncryption}

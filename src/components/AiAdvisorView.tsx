@@ -44,6 +44,7 @@ interface AiAdvisorViewProps {
   onUpdateAiRatiosOnly: (ratiosOnly: boolean) => void;
   onForgetAiSession: () => void;
   onNavigateSettings: () => void;
+  onNavigateReports: () => void;
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -66,6 +67,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
   onUpdateAiRatiosOnly,
   onForgetAiSession,
   onNavigateSettings,
+  onNavigateReports,
 }) => {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [showInspector, setShowInspector] = useState(false);
@@ -176,7 +178,9 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
             Privacy-First AI Advisor
           </h1>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Off by default · Controlled in Vault &amp; Settings · Only anonymized local summaries are ever sent
+            {isNativePackage
+              ? 'No AI model or provider connection in this native preview · Local reports remain available'
+              : 'Off by default · Controlled in Vault & Settings · Only anonymized local summaries are sent on request'}
           </p>
         </div>
 
@@ -191,41 +195,49 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
       </div>
 
       {isNativePackage && (
-        <div role="status" className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200 text-sm">
-          AI Advisor is not connected in this private Windows/Android build. Local reports and planning still work; no finance data is sent to an AI provider.
+        <div role="status" className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200 text-sm space-y-2">
+          <p>AI Advisor is unavailable in this Windows/Android preview. No on-device AI model or provider connection is bundled, so this app cannot send finance data to an AI provider.</p>
+          <button type="button" onClick={onNavigateReports} className="underline font-medium cursor-pointer">
+            Open local Reports (no AI)
+          </button>
         </div>
       )}
 
       {/* Synced Provider & Retention Bar (mirrors ReadAloud Settings controls) */}
       <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-          <div className="md:col-span-4">
+          <div className={isNativePackage ? 'md:col-span-12' : 'md:col-span-4'}>
             <label
-              htmlFor="advisor-provider-select"
+              htmlFor={isNativePackage ? undefined : 'advisor-provider-select'}
               className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
             >
               Provider
             </label>
-            <select
-              id="advisor-provider-select"
-              disabled={isNativePackage}
-              value={aiSettings.provider}
-              onChange={(e) => {
-                const next = e.target.value as AiProviderSetting;
-                onUpdateAiProvider(next);
-                setError(null);
-                setSessionNotice(null);
-              }}
-              className="w-full min-h-[42px] px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100"
-            >
-              <option value="off">Off</option>
-              <option value="claude">Claude (Anthropic)</option>
-              <option value="chatgpt">ChatGPT (OpenAI)</option>
-              <option value="gemini">Gemini (Google)</option>
-            </select>
+            {isNativePackage ? (
+              <div className="w-full min-h-[42px] px-3 py-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 text-sm text-slate-600 dark:text-slate-400" role="status">
+                Unavailable in this native preview — no local AI model installed
+              </div>
+            ) : (
+              <select
+                id="advisor-provider-select"
+                value={aiSettings.provider}
+                onChange={(e) => {
+                  const next = e.target.value as AiProviderSetting;
+                  onUpdateAiProvider(next);
+                  setError(null);
+                  setSessionNotice(null);
+                }}
+                className="w-full min-h-[42px] px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100"
+              >
+                <option value="off">Off</option>
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="chatgpt">ChatGPT (OpenAI)</option>
+                <option value="gemini">Gemini (Google)</option>
+              </select>
+            )}
           </div>
 
-          <div className="md:col-span-4">
+          {!isNativePackage && <div className="md:col-span-4">
             <label
               htmlFor="advisor-retention-select"
               className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
@@ -245,9 +257,9 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
                 </option>
               ))}
             </select>
-          </div>
+          </div>}
 
-          <div className="md:col-span-4 flex items-center justify-between md:justify-end gap-3">
+          {!isNativePackage && <div className="md:col-span-4 flex items-center justify-between md:justify-end gap-3">
             {!isOff ? (
               <>
                 <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -278,7 +290,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
                 No external AI provider active
               </span>
             )}
-          </div>
+          </div>}
         </div>
       </section>
 
@@ -328,7 +340,10 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
               className="min-h-[38px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Eye className="w-3.5 h-3.5" />
-              <span>{showInspector ? 'Hide Outbound Payload' : 'Inspect Outbound JSON'}</span>
+              <span>{isNativePackage
+                ? (showInspector ? 'Hide Local Summary' : 'Inspect Local Summary (No AI)')
+                : (showInspector ? 'Hide Outbound Payload' : 'Inspect Outbound JSON')}
+              </span>
               {showInspector ? (
                 <ChevronUp className="w-3.5 h-3.5" />
               ) : (
@@ -342,7 +357,7 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
           <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
               <span>
-                Exact payload sent when enabled ({new Blob([packetJson]).size} bytes · strictly allowlisted schema)
+                {isNativePackage ? 'Local-only summary preview; this build transmits no AI payload' : 'Exact payload sent when enabled'} ({new Blob([packetJson]).size} bytes · strictly allowlisted schema)
               </span>
               <span className="font-mono-num">
                 {aiSettings.ratiosOnly ? 'Ratios & Bands Only' : 'Rounded Category Totals'}
@@ -359,11 +374,11 @@ export const AiAdvisorView: React.FC<AiAdvisorViewProps> = ({
       {isOff ? (
         <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 sm:p-8 text-center space-y-3">
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            AI Financial Assistant is turned Off
+            {isNativePackage ? 'AI Advisor unavailable in this preview' : 'AI Financial Assistant is turned Off'}
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 max-w-xl mx-auto leading-relaxed">
             {isNativePackage
-              ? 'This private native build keeps the AI Advisor disconnected. Your local finance tools remain available.'
+              ? 'This native preview has no AI model or provider connection. Use local Reports and planning for on-device calculations.'
               : 'Clearledger runs 100% locally without sending anything off your device. Select Claude, ChatGPT, or Gemini in the Provider dropdown above—or in Vault & Settings—whenever you want AI guidance on your anonymized summary.'}
           </p>
         </section>

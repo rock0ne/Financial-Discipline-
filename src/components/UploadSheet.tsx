@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   Calendar,
   Download,
@@ -153,6 +154,7 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
   onCommitImport,
   onVerifyImportStatus,
 }) => {
+  const isNativeAndroid = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
   const [dragActive, setDragActive] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -761,7 +763,14 @@ export const UploadSheet: React.FC<UploadSheetProps> = ({
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50/70 dark:bg-slate-950/40">
+        <div
+          className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50/70 dark:bg-slate-950/40"
+          style={isNativeAndroid ? {
+            // Android 15+ can draw the WebView behind three-button navigation.
+            // Use the reported inset, with a 48px fallback when WebView reports zero.
+            paddingBottom: 'calc(1rem + max(3rem, env(safe-area-inset-bottom, 0px)))',
+          } : undefined}
+        >
           <button
             type="button"
             onClick={onClose}

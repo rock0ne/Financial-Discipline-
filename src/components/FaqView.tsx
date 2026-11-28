@@ -25,7 +25,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'AI & Key Hygiene',
     question: 'How do I connect my own Gemini, Claude, or ChatGPT API key safely?',
     answer:
-      'Clearledger never renders browser form inputs for API keys so credentials cannot leak into browser storage, extensions, or client-side JavaScript. Instead, add GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY in Settings > Secrets (or in your local host .env file on Windows). Once configured on the local server proxy, that model unlocks automatically inside the AI Advisor tab.',
+      'Only the separately hosted web-server mode supports Gemini, Claude, or ChatGPT through a server-side proxy. Configure GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY on that server, never in the app or a bank statement. The packaged Windows/Android preview has no AI provider connection and no on-device AI model; adding a key does not unlock AI there.',
     actionLabel: 'Open AI Advisor',
     actionTab: 'ai',
   },
@@ -35,7 +35,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'AI & Key Hygiene',
     question: 'How does timed AI access hygiene work when I no longer need AI advice?',
     answer:
-      'In the AI Advisor tab, you choose a strict access window (5, 15, or 30 minutes, or Single Query Only). When the countdown finishes—or when you click "End Session & Clear AI Context Now"—outbound AI calls lock automatically and cached advice is cleared from memory. For full API key hygiene between monthly statement reviews, remove or rotate unused keys in Settings > Secrets or set short expiry dates in your AI provider dashboard.',
+      'In the separately hosted web-server mode, you can choose Single Query Only or a 15-minute, 1-hour, 7-day, or 30-day UI access window. When it expires or you turn AI Off, this app stops offering AI requests and clears cached advice. This does not revoke a server-side API key; remove or rotate that key separately. The packaged Windows/Android preview has no AI access window because AI is unavailable there.',
     actionLabel: 'Configure Session Timer',
     actionTab: 'ai',
   },
@@ -45,7 +45,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'AI & Key Hygiene',
     question: 'Do Gemini, Claude, or ChatGPT ever see my bank statements or merchant names?',
     answer:
-      'No. All statement parsing, categorization, recurring subscription detection, and cap tracking run 100% locally on your device. Only a compact, allowlisted summary packet (which you can inspect line-by-line with "Inspect Outbound JSON") is sent when you explicitly request advice. You can also turn on "Mask exact amounts" so even rounded totals are replaced with percentages and income bands.',
+      'The packaged Windows/Android preview makes no AI-provider request. In the separately hosted web-server mode, statement parsing and analytics run locally; an explicit AI request sends a compact, allowlisted summary and your optional question to the chosen external provider. Inspect the summary first and use "Mask exact amounts" if needed. Do not enter personal or bank details in the question.',
     actionLabel: 'Inspect AI Firewall',
     actionTab: 'ai',
   },
@@ -55,7 +55,7 @@ const FAQ_ITEMS: FaqItem[] = [
     categoryLabel: 'Privacy & Encryption',
     question: 'Where is my financial data stored and how is it encrypted?',
     answer:
-      'Everything lives strictly inside your browser or Windows device IndexedDB storage—never on any cloud server or third-party aggregator. When you enable a Vault Passphrase under Local Vault, Clearledger derives a 256-bit key using PBKDF2-SHA256 (310,000 iterations) and encrypts your entire ledger, goals, and caps with AES-256-GCM before writing to disk.',
+      'The local vault uses IndexedDB on your browser, Windows device, or Android phone; it is not automatically synced to a cloud server. It is unencrypted until you enable a Vault Passphrase. With a passphrase, Clearledger derives a key using PBKDF2-SHA256 and encrypts the vault with AES-256-GCM before writing it to disk.',
     actionLabel: 'Manage Local Vault',
     actionTab: 'vault',
   },
