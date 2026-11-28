@@ -80,7 +80,7 @@ interface VaultSecurityViewProps {
   onUpdateExchangeRates: (rates: Partial<ExchangeRateTable>) => void;
   onToggleDarkMode: () => void;
   onResetSampleData: () => Promise<void>;
-  onShredAllData: () => Promise<void>;
+  onShredAllData: () => Promise<boolean>;
 }
 
 function formatImportTimestamp(iso: string): string {
@@ -1126,9 +1126,11 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
                   <button
                     type="button"
                     onClick={async () => {
-                      await onShredAllData();
+                      const notificationsCleared = await onShredAllData();
                       setConfirmShred(false);
-                      setStatusMsg('All local transactions and keys permanently wiped from this device.');
+                      setStatusMsg(notificationsCleared
+                        ? 'Local vault data wiped and pending Clearledger reminders cancelled.'
+                        : 'Local vault data wiped, but notification opt-out or pending-reminder cancellation could not be confirmed. Disable Clearledger notifications in your device settings.');
                     }}
                     className="min-h-[40px] px-3.5 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
                   >

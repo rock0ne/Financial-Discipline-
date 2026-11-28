@@ -87,14 +87,25 @@ export function hasLocalAlertReceipt(receiptKey: string): boolean {
   return volatileReceipts.has(receiptKey) || loadLocalAlertReceipts().has(receiptKey);
 }
 
-export function clearLocalAlertDeliveryState(): void {
+/** False means local opt-out/receipt removal could not be confirmed. */
+export function clearLocalAlertDeliveryState(): boolean {
   deliveryEpoch += 1;
   volatileReceipts.clear();
+  let cleared = true;
   try {
     localStorage.removeItem(RECEIPTS_KEY);
+  } catch {
+    cleared = false;
+  }
+  try {
     localStorage.removeItem(OPT_IN_KEY);
   } catch {
-    // The encrypted/plaintext vault is still shredded independently.
+    cleared = false;
+  }
+  try {
+    return cleared && localStorage.getItem(OPT_IN_KEY) !== 'enabled';
+  } catch {
+    return false;
   }
 }
 

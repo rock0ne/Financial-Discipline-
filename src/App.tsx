@@ -1395,9 +1395,10 @@ export default function App() {
   }, [persistPayload]);
 
   const handleShredAllData = useCallback(async () => {
-    clearLocalAlertDeliveryState();
+    const localPreferenceCleared = clearLocalAlertDeliveryState();
     setOsAlertsEnabled(false);
-    try { await cancelAllManagedLocalNotifications(); } catch { /* Continue erasing local data. */ }
+    let notificationsCleared = localPreferenceCleared;
+    try { await cancelAllManagedLocalNotifications(); } catch { notificationsCleared = false; }
     await shredLocalVault();
     setActivePassphrase(null);
     setLatestEnvelope(null);
@@ -1425,6 +1426,7 @@ export default function App() {
     };
     resetPresent(empty);
     await savePlaintextLocalVault(empty);
+    return notificationsCleared;
   }, [resetPresent]);
 
   if (loading) {
@@ -1443,15 +1445,19 @@ export default function App() {
         envelope={lockedEnvelope}
         onUnlock={handleUnlockVault}
         onResetVault={async () => {
-          clearLocalAlertDeliveryState();
+          const localPreferenceCleared = clearLocalAlertDeliveryState();
           setOsAlertsEnabled(false);
-          try { await cancelAllManagedLocalNotifications(); } catch { /* Continue erasing local data. */ }
+          let notificationsCleared = localPreferenceCleared;
+          try { await cancelAllManagedLocalNotifications(); } catch { notificationsCleared = false; }
           await shredLocalVault();
           const fresh = generateSample14MonthData();
           await savePlaintextLocalVault(fresh);
           setLockedEnvelope(null);
           setLatestEnvelope(null);
           resetPresent(fresh);
+          if (!notificationsCleared) {
+            window.alert('The local vault was reset, but notification opt-out or pending-reminder cancellation could not be confirmed. Disable Clearledger notifications in your device settings.');
+          }
         }}
       />
     );

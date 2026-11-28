@@ -3,6 +3,9 @@ const fs = require('node:fs/promises');
 const path = require('path');
 const { pathToFileURL } = require('node:url');
 
+// Must match electron-builder appId so installed Windows shortcuts can route toasts.
+if (process.platform === 'win32') app.setAppUserModelId('app.clearledger.finance.studio');
+
 const distIndex = path.join(__dirname, '..', 'dist', 'index.html');
 const expectedRendererUrl = pathToFileURL(distIndex).href;
 const maxDocumentBytes = 32 * 1024 * 1024;

@@ -28,9 +28,23 @@ describe('local alert delivery privacy and receipts', () => {
     recordLocalAlertReceipt(key);
     assert.equal(hasLocalAlertReceipt(key), true);
     assert.equal(hasLocalAlertReceipt('private-rule:2026-12'), false);
-    clearLocalAlertDeliveryState();
+    assert.equal(clearLocalAlertDeliveryState(), true);
     assert.equal(hasLocalAlertReceipt(key), false);
     assert.equal(osAlertsOptedIn(), false);
+  });
+
+  it('reports unconfirmed cleanup when device preference removal fails', () => {
+    Object.assign(globalThis, { localStorage: storage });
+    stored.clear();
+    setOsAlertsOptIn(true);
+    Object.assign(globalThis, { localStorage: {
+      ...storage,
+      removeItem: () => { throw new Error('storage blocked'); },
+    } });
+    assert.equal(clearLocalAlertDeliveryState(), false);
+    assert.equal(osAlertsOptedIn(), true);
+    Object.assign(globalThis, { localStorage: storage });
+    stored.clear();
   });
 
   it('cannot claim an opt-in when device preference storage rejects writes', () => {
