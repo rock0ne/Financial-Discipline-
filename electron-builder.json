@@ -1,16 +1,18 @@
 {
-  "appId": "app.clearledger.finance",
-  "productName": "Clearledger",
+  "appId": "app.clearledger.finance.studio",
+  "productName": "Clearledger Studio Preview",
   "copyright": "Clearledger Local-First Finance",
   "directories": {
-    "output": "release"
+    "output": "release-studio"
   },
   "files": [
     "dist/**/*",
     "electron/**/*",
     "public/pwa-512x512.png",
-    "package.json"
+    "package.json",
+    "!node_modules/**/*"
   ],
+  "npmRebuild": false,
   "extraMetadata": {
     "main": "electron/main.cjs"
   },

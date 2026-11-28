@@ -4,7 +4,7 @@ android {
     namespace = "app.clearledger.finance"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "app.clearledger.finance"
+        applicationId "app.clearledger.finance.studio"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 2

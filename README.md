@@ -6,10 +6,10 @@ The Clearledger source is publicly visible but rights are reserved; no open-sour
 
 ## Key Features
 
-- **Local-first vault**: Data is kept on this device; a passphrase enables AES-256-GCM encryption. No cloud storage is required.
-- **Accurate Spending Forecast Engine**: Tracks per-category history lengths (ignoring leading structural zeros), detects and excludes incomplete trailing months from baselines (with optional pro-rating), and retains pence precision across all cap warnings.
+- **Local-first vault**: A fictional 14-month sample is loaded on first launch. Data is stored on this device in local IndexedDB and is not encrypted until a vault passphrase is enabled; the passphrase enables AES-256-GCM encryption. Do not keep sensitive statements on a shared or untrusted device without enabling it.
+- **Spending Forecast Engine**: Estimates category trends and cap warnings. Verify imported transactions and totals independently before relying on a forecast.
 - **Smart Ledger, Structured Search & Custom Tags**:
-  - Multi-file CSV/TSV/OFX/QFX/JSON and text-based PDF statement import with account-aware deduplication, batch rollback, and global Undo/Redo.
+  - Multi-file CSV/TSV/OFX/QFX/JSON and text-based PDF statement import with local parsing. Review imported transactions and possible duplicates yourself; Undo/Redo is available in the ledger.
   - Structured search bar supporting merchant/description queries, date ranges (`2026-10-01..2026-10-31`, `from:`/`to:`), amount comparators/ranges (`>50`, `20..80`, `£42.50`), and `#tag` filters.
   - Inline custom transaction tagging plus automated **Tax Deductible** and **Expense Claimable** Smart Tags, all included in spreadsheet-ready CSV exports.
 - **Recurring Subscriptions & 12-Month Projection**: Auto-detects recurring charges and price hikes, lets you classify items as Essential or Cancelable, and forecasts total 12-month recurring expenditure across both Current Habits and Cancelable-Cut scenarios.
@@ -33,9 +33,9 @@ npm run build
 
 ## PDF statement import
 
-Choose **Import Statements** and select a readable, text-based bank-statement PDF or a folder containing statements. PDF.js extracts the text inside the local app; statement contents are not uploaded. The importer accepts only recognisable transaction tables with an explicit Date, Description and Debit/Credit columns, or an Amount column whose values identify their debit/credit direction. Each PDF must represent one account: enter a stable, distinct account label and reuse that label for future downloads of the same account. Review the displayed dates, currencies and signed amounts against the original statement, then explicitly confirm before anything is saved.
+Choose **Import Statements** and select a readable, text-based bank-statement PDF or a folder containing statements. PDF.js extracts text inside the local app; statement contents are not uploaded to a PDF conversion service. The Studio Preview does **not** require a distinct account label or row-by-row confirmation before **Analyze**.
 
-Bank PDF layouts differ. Scanned/image-only, password-protected, ambiguous and unsupported layouts are rejected rather than guessed; ask the bank for CSV or OFX where available. A PDF is limited to 15 MiB, 100 pages and 5,000 transactions. The importer reports individual file failures and requires acknowledgement before importing the remaining files of a mixed batch. Identical repeated rows within one statement are retained; overlapping copies across statements are deduplicated by account/date/description/amount occurrence count. If a bank does not supply transaction IDs, two separately exported identical charges cannot always be distinguished from an overlapping copy, so inspect the skipped count and your ledger after import.
+Bank PDF layouts differ. This preview may mistake informational or fee rows for transactions, miss transactions, or import overlapping statements twice. Scanned, password-protected, or unsupported PDFs may fail. Prefer a bank CSV or OFX export when available. Before relying on any figures, compare the imported row count, dates, signed amounts, and balances with the original statements. Do not use this preview for financial decisions.
 
 ## Project Layout
 

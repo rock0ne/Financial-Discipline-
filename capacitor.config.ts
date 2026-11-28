@@ -1,6 +1,6 @@
 const config = {
-  appId: 'app.clearledger.finance',
-  appName: 'Clearledger',
+  appId: 'app.clearledger.finance.studio',
+  appName: 'Clearledger Studio Preview',
   webDir: 'dist',
   bundledWebRuntime: false,
   android: {

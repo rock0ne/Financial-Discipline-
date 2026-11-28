@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Clearledger</string>
-    <string name="title_activity_main">Clearledger</string>
-    <string name="package_name">app.clearledger.finance</string>
-    <string name="custom_url_scheme">app.clearledger.finance</string>
+    <string name="app_name">Clearledger Studio Preview</string>
+    <string name="title_activity_main">Clearledger Studio Preview</string>
+    <string name="package_name">app.clearledger.finance.studio</string>
+    <string name="custom_url_scheme">app.clearledger.finance.studio</string>
 </resources>
