@@ -430,6 +430,8 @@ export interface VaultPayload {
   recurringActions: Record<string, 'keep' | 'downgrade' | 'cancel'>;
   subscriptionClassOverrides?: Record<string, SubscriptionClass>;
   categoryCaps?: Partial<Record<CategoryId, number>>;
+  /** Private, user-defined local alert rules. No notification is sent by default. */
+  localAlertRules?: LocalAlertRule[];
   categoryRules?: CategoryRule[];
   advancedRules?: AdvancedAutomationRule[];
   plannerState?: PersonalPlannerState;
@@ -438,6 +440,35 @@ export interface VaultPayload {
   goals: SavingsGoal[];
   isaSettings: IsaPlannerSettings;
 }
+
+export type LocalAlertRule =
+  | {
+      id: string;
+      kind: 'category_spend';
+      enabled: boolean;
+      categoryId: CategoryId;
+      threshold: number;
+      /** Currency selected when the threshold was created; never reinterpreted on display-currency changes. */
+      thresholdCurrency: CurrencyCode;
+      createdAt: string;
+    }
+  | {
+      id: string;
+      kind: 'projected_cap';
+      enabled: boolean;
+      categoryId: CategoryId;
+      createdAt: string;
+    }
+  | {
+      id: string;
+      kind: 'date_reminder';
+      enabled: boolean;
+      /** Local date/time in YYYY-MM-DDTHH:mm format; never sent to a server. */
+      at: string;
+      /** Optional private reminder label; never shown in OS notification content. */
+      label?: string;
+      createdAt: string;
+    };
 
 export interface EncryptedVaultEnvelope {
   format: 'clearledger-e2ee-v1';

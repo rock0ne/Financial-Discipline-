@@ -38,6 +38,7 @@ import {
   type EncryptedVaultEnvelope,
   type ExchangeRateTable,
   type IsaPlannerSettings,
+  type LocalAlertRule,
   type PersonalPlannerState,
   type SavingsGoal,
   type StatementImportMeta,
@@ -92,6 +93,19 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { useCapPaceMonitor } from './hooks/useCapPaceMonitor';
 import { usePayloadHistory } from './hooks/usePayloadHistory';
+import { evaluateLocalAlerts, normalizeLocalAlertRules } from './utils/localAlerts';
+import {
+  cancelAllManagedLocalNotifications,
+  clearLocalAlertDeliveryState,
+  hasLocalAlertReceipt,
+  localAlertPlatform,
+  osAlertsOptedIn,
+  recordLocalAlertReceipt,
+  requestOsAlertOptIn,
+  setOsAlertsOptIn,
+  showGenericLocalNotification,
+  syncScheduledDateReminders,
+} from './utils/localAlertDelivery';
 
 type ActiveTab =
   | 'overview'
@@ -275,6 +289,9 @@ export default function App() {
     return isNativePackage ? { ...saved, provider: 'off', expiresAt: null } : saved;
   });
   const [providerStatus, setProviderStatus] = useState<ProviderAvailabilityMap | null>(null);
+  const [osAlertsEnabled, setOsAlertsEnabled] = useState(osAlertsOptedIn);
+  const [localAlertNow, setLocalAlertNow] = useState(() => new Date());
+  const inFlightAlertReceipts = useRef(new Set<string>());
   const themeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -641,6 +658,90 @@ export default function App() {
     payload?.currency ?? 'GBP',
     payload?.exchangeRates
   );
+
+  useEffect(() => {
+    const refresh = () => setLocalAlertNow(new Date());
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
+
+  const localAlertMatches = useMemo(() => payload ? evaluateLocalAlerts(
+    payload.localAlertRules,
+    payload.transactions,
+    payload.categoryCaps ?? {},
+    payload.currency,
+    payload.exchangeRates,
+    localAlertNow
+  ) : [], [payload, localAlertNow]);
+
+  useEffect(() => {
+    if (!payload) return;
+    const reconciliation = osAlertsEnabled
+      ? syncScheduledDateReminders(payload.localAlertRules, true)
+      : cancelAllManagedLocalNotifications();
+    void reconciliation.catch(() => {
+      // A failed Android reconciliation is retried on the next minute/focus/unlock.
+    });
+  }, [payload?.localAlertRules, osAlertsEnabled, localAlertNow]);
+
+  useEffect(() => {
+    if (!payload || !osAlertsEnabled) return;
+    const platform = localAlertPlatform();
+    if (platform === 'none') return;
+    for (const match of localAlertMatches) {
+      if (match.kind === 'date_reminder' && platform === 'android') continue;
+      if (payload.isSampleData && match.kind !== 'date_reminder') continue;
+      if (hasLocalAlertReceipt(match.receiptKey) || inFlightAlertReceipts.current.has(match.receiptKey)) continue;
+      inFlightAlertReceipts.current.add(match.receiptKey);
+      void showGenericLocalNotification(match.ruleId, match.kind === 'date_reminder' ? 'reminder' : 'trigger')
+        .then((sent) => { if (sent) recordLocalAlertReceipt(match.receiptKey); })
+        .catch(() => { /* A missed OS notification remains visible as an in-app match. */ })
+        .finally(() => { inFlightAlertReceipts.current.delete(match.receiptKey); });
+    }
+  }, [payload, localAlertMatches, osAlertsEnabled]);
+
+  const handleUpdateLocalAlertRules = useCallback(async (rules: LocalAlertRule[]): Promise<boolean> => {
+    if (!payload) throw new Error('Vault unavailable');
+    const normalized = normalizeLocalAlertRules(rules);
+    if (normalized.length !== rules.length) throw new Error('Invalid local alert rules');
+    await persistPayload({ ...payload, localAlertRules: normalized }, {
+      label: 'Updated local alert rules', saveBeforeHistory: true,
+    });
+    try {
+      await syncScheduledDateReminders(normalized, osAlertsEnabled);
+      return true;
+    } catch {
+      return false; // Vault write succeeded; OS scheduling/cancellation is unconfirmed.
+    }
+  }, [payload, persistPayload, osAlertsEnabled]);
+
+  const handleEnableOsAlerts = useCallback(async () => {
+    const granted = await requestOsAlertOptIn();
+    if (granted) {
+      setOsAlertsOptIn(true);
+      const saved = osAlertsOptedIn();
+      setOsAlertsEnabled(saved);
+      return saved;
+    }
+    return false;
+  }, []);
+
+  const handleDisableOsAlerts = useCallback(async () => {
+    setOsAlertsOptIn(false);
+    setOsAlertsEnabled(false);
+    let cancellationError: unknown;
+    try { await cancelAllManagedLocalNotifications(); } catch (error) { cancellationError = error; }
+    if (osAlertsOptedIn()) {
+      throw new Error('Device opt-out could not be saved. Disable Clearledger notifications in system settings.');
+    }
+    if (cancellationError) throw cancellationError;
+  }, []);
 
   const handleReviewCaps = useCallback(() => {
     setActiveTab('overview');
@@ -1294,6 +1395,9 @@ export default function App() {
   }, [persistPayload]);
 
   const handleShredAllData = useCallback(async () => {
+    clearLocalAlertDeliveryState();
+    setOsAlertsEnabled(false);
+    try { await cancelAllManagedLocalNotifications(); } catch { /* Continue erasing local data. */ }
     await shredLocalVault();
     setActivePassphrase(null);
     setLatestEnvelope(null);
@@ -1309,6 +1413,7 @@ export default function App() {
       recommendationOverrides: {},
       categoryRules: [],
       advancedRules: [],
+      localAlertRules: [],
       debts: [],
       plannerState: {
         commitmentDeclaration: '',
@@ -1338,6 +1443,9 @@ export default function App() {
         envelope={lockedEnvelope}
         onUnlock={handleUnlockVault}
         onResetVault={async () => {
+          clearLocalAlertDeliveryState();
+          setOsAlertsEnabled(false);
+          try { await cancelAllManagedLocalNotifications(); } catch { /* Continue erasing local data. */ }
           await shredLocalVault();
           const fresh = generateSample14MonthData();
           await savePlaintextLocalVault(fresh);
@@ -1802,6 +1910,14 @@ export default function App() {
               imports={payload.imports}
               isSampleData={payload.isSampleData}
               aiSettings={aiSettings}
+              localAlertRules={normalizeLocalAlertRules(payload.localAlertRules)}
+              localAlertMatches={localAlertMatches}
+              categoryCaps={payload.categoryCaps ?? {}}
+              osAlertsEnabled={osAlertsEnabled}
+              onUpdateLocalAlertRules={handleUpdateLocalAlertRules}
+              onEnableOsAlerts={handleEnableOsAlerts}
+              onDisableOsAlerts={handleDisableOsAlerts}
+              onTestOsAlert={() => showGenericLocalNotification('user-test', 'trigger')}
               providerStatus={providerStatus}
               onUpdateAiProvider={handleUpdateAiProvider}
               onUpdateAiRetention={handleUpdateAiRetention}

@@ -26,6 +26,8 @@ import {
   type CurrencyCode,
   type EncryptedVaultEnvelope,
   type ExchangeRateTable,
+  type CategoryId,
+  type LocalAlertRule,
   type StatementImportMeta,
   type Transaction,
 } from '../types/finance';
@@ -36,6 +38,8 @@ import {
   type ProviderAvailabilityMap,
 } from '../utils/aiSettings';
 import type { DocumentSaveResult } from '../utils/documentSave';
+import type { LocalAlertMatch } from '../utils/localAlerts';
+import { LocalAlertsSettings } from './LocalAlertsSettings';
 
 interface VaultSecurityViewProps {
   isEncrypted: boolean;
@@ -48,6 +52,14 @@ interface VaultSecurityViewProps {
   imports: StatementImportMeta[];
   isSampleData: boolean;
   aiSettings: AiAssistantSettings;
+  localAlertRules: LocalAlertRule[];
+  localAlertMatches: LocalAlertMatch[];
+  categoryCaps: Partial<Record<CategoryId, number>>;
+  osAlertsEnabled: boolean;
+  onUpdateLocalAlertRules: (rules: LocalAlertRule[]) => Promise<boolean>;
+  onEnableOsAlerts: () => Promise<boolean>;
+  onDisableOsAlerts: () => Promise<void>;
+  onTestOsAlert: () => Promise<boolean>;
   providerStatus: ProviderAvailabilityMap | null;
   onUpdateAiProvider: (provider: AiProviderSetting) => void;
   onUpdateAiRetention: (retention: AiRetentionOption) => void;
@@ -94,6 +106,14 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
   imports,
   isSampleData,
   aiSettings,
+  localAlertRules,
+  localAlertMatches,
+  categoryCaps,
+  osAlertsEnabled,
+  onUpdateLocalAlertRules,
+  onEnableOsAlerts,
+  onDisableOsAlerts,
+  onTestOsAlert,
   providerStatus,
   onUpdateAiProvider,
   onUpdateAiRetention,
@@ -289,6 +309,19 @@ export const VaultSecurityView: React.FC<VaultSecurityViewProps> = ({
           {errorMsg}
         </div>
       )}
+
+      <LocalAlertsSettings
+        rules={localAlertRules}
+        matches={localAlertMatches}
+        categoryCaps={categoryCaps}
+        currency={currency}
+        isSampleData={isSampleData}
+        osEnabled={osAlertsEnabled}
+        onUpdateRules={onUpdateLocalAlertRules}
+        onEnableOs={onEnableOsAlerts}
+        onDisableOs={onDisableOsAlerts}
+        onTestOs={onTestOsAlert}
+      />
 
       {/* AI Financial Assistant Settings (ReadAloud-style calm, off-by-default design) */}
       <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-5">

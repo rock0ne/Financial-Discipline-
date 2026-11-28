@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell, Notification } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('path');
 const { pathToFileURL } = require('node:url');
@@ -64,11 +64,29 @@ function decodeDocumentRequest(request) {
 }
 
 let saveInProgress = false;
+function isTrustedRenderer(event) {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+  return Boolean(ownerWindow && !ownerWindow.isDestroyed() &&
+    event.senderFrame === event.sender.mainFrame &&
+    event.senderFrame?.url === expectedRendererUrl);
+}
+
+ipcMain.handle('clearledger:local-notification', async (event) => {
+  if (!isTrustedRenderer(event) || !Notification.isSupported()) return false;
+  new Notification({
+    title: 'Clearledger alert',
+    body: 'Open Clearledger to review your local alert.',
+  }).show();
+  return true;
+});
+
+ipcMain.handle('clearledger:local-notification-support', async (event) =>
+  isTrustedRenderer(event) && Notification.isSupported()
+);
+
 ipcMain.handle('clearledger:save-document', async (event, request) => {
   const ownerWindow = BrowserWindow.fromWebContents(event.sender);
-  if (!ownerWindow || ownerWindow.isDestroyed() ||
-      event.senderFrame !== event.sender.mainFrame ||
-      event.senderFrame?.url !== expectedRendererUrl) {
+  if (!isTrustedRenderer(event)) {
     return { status: 'error', message: 'Untrusted export request was refused.' };
   }
   if (saveInProgress) {
