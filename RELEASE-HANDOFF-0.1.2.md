@@ -5,13 +5,13 @@ Status: **unsigned private test candidate; do not publish yet.** Source branch `
 ## Progress gauge
 
 1. **Source integration — done.** Android Back/footer and true folder picker; first real import forcibly replaces fictional sample data; local category threshold, projected-cap and date-reminder rules. On-device AI and BYOK are separate, not in this candidate.
-2. **Automated verification — done.** `pnpm lint`, 65/65 tests, `pnpm build:native`, Capacitor sync, Android `assembleRelease`, and Windows packaging passed. Android APK contains no PWA service worker or web manifest. Its manifest contains `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, and `WAKE_LOCK`, but no exact-alarm permission.
+2. **Automated verification — done.** `pnpm lint`, 66/66 tests, `pnpm build:native`, Capacitor sync, Android `assembleRelease`, and Windows packaging passed. Android APK contains no PWA service worker or web manifest. Its manifest contains `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, and `WAKE_LOCK`, but no exact-alarm permission.
 3. **Private device verification — partly done.** The combined Android Back, footer, and folder picker passed on a uniquely named synthetic test app; a separate folder test imported and reread two fictional rows. The alert notification test was **inconclusive** when the phone foreground changed to another test package. Windows OS toast was not tested on an installed app.
 4. **Owner signing and public release — not started.** Do not sign or publish until the notification test, final review and owner decision. The ordinary debug package ID `app.clearledger.finance.studio.debug` already has owner data; never install this candidate's ordinary debug APK over it.
 
 ## Built artifacts (unsigned)
 
-- Android: `android/app/build/outputs/apk/release/app-release-unsigned.apk`, package `app.clearledger.finance.studio`, version code `3`, version name `0.1.2`, SHA-256 `01F377DDE09AA7DD24421772A158649E29F23DBC94E120CB641094F478414863`.
+- Android: `android/app/build/outputs/apk/release/app-release-unsigned.apk`, package `app.clearledger.finance.studio`, version code `3`, version name `0.1.2`, SHA-256 `35E8210E46A5A271DEDCC3713F3024421132D96CBF0D99488F21750E65ED5A76`.
 - Windows NSIS test build: `J:\PurpleTeam\output\clearledger-windows-alerts-check-20261128\release-studio\Clearledger Studio Preview Setup 0.1.2-studio.0.exe`, SHA-256 `4D03EC47FB0F263ADDB45B6C3CC7950F7F2FF1F43304839019525A1E1F4DA9EE`.
 - Windows portable test build: sibling `Clearledger Studio Preview 0.1.2-studio.0.exe`, SHA-256 `B6AD8653995B20BC5DB044E47781CF673384DD1DA7E459077766C9387D2A7E3B`.
 

@@ -14,7 +14,7 @@ This candidate is based on the separate Studio Preview release branch, preservin
 
 ## Verification to date
 
-- TypeScript/lint and all **65 offline tests** passed after integration. Native build, Capacitor sync, and Android `assembleRelease` passed; packaged native assets contain no `sw.js`, `registerSW.js`, or `manifest.webmanifest`. The unsigned APK is [app-release-unsigned.apk](android/app/build/outputs/apk/release/app-release-unsigned.apk), SHA-256 `01F377DDE09AA7DD24421772A158649E29F23DBC94E120CB641094F478414863`. It has not been signed or installed.
+- TypeScript/lint and all **66 offline tests** passed after integration. Native build, Capacitor sync, and Android `assembleRelease` passed; packaged native assets contain no `sw.js`, `registerSW.js`, or `manifest.webmanifest`. The unsigned APK is [app-release-unsigned.apk](android/app/build/outputs/apk/release/app-release-unsigned.apk), SHA-256 `35E8210E46A5A271DEDCC3713F3024421132D96CBF0D99488F21750E65ED5A76`. It has not been signed or installed.
 - On the S21+, a fresh isolated `app.clearledger.finance.combinedtest.debug` package showed the action footer clear of the Android navigation bar, physical Back dismissed the Import sheet without exiting, and the system folder picker opened. Cancelling it returned to an empty Import sheet with Analyze disabled. That isolated test package and its temporary phone screenshot were removed; the owner-data package was untouched.
 - The folder-picker feature separately passed a synthetic two-transaction import, non-statement-file exclusion, persistence after restart, and cancel path in `app.clearledger.finance.foldertest.debug`. No real bank statement was used.
 
