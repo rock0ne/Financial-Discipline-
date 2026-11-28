@@ -507,4 +507,113 @@ describe('pdfStatementParser (local UK/US/EU bank PDF statement engine)', () => 
     assert.equal(rejected.transactions.length, 0);
     assert.match(rejected.warnings[0], /running balance/);
   });
+
+  it('keeps verified transactions before a standalone overdraft-cost disclosure page', () => {
+    const transactionPage: PdfExtractedPage = {
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Description' },
+          { x: 350, text: 'Paid Out' },
+          { x: 425, text: 'Paid In' },
+          { x: 500, text: 'Balance' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 120, text: 'BALANCE BROUGHT FORWARD' },
+          { x: 500, text: '100.00' },
+        ]),
+        ...makeRowSpans(660, [
+          { x: 40, text: '01 Nov 2026' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 350, text: '10.00' },
+          { x: 500, text: '90.00' },
+        ]),
+      ],
+    };
+    const disclosurePage: PdfExtractedPage = {
+      pageNumber: 2,
+      spans: [
+        ...makeRowSpans(700, [{ x: 40, text: 'Unarranged overdraft interest' }]),
+        ...makeRowSpans(680, [{ x: 40, text: 'Nominal monthly rate' }]),
+        ...makeRowSpans(660, [{ x: 40, text: 'Unpaid transaction fees' }]),
+        ...makeRowSpans(640, [{ x: 40, text: 'Maximum monthly charge' }]),
+        ...makeRowSpans(620, [
+          { x: 40, text: 'Account costs' },
+          { x: 290, text: 'A' },
+          { x: 360, text: 'B' },
+          { x: 430, text: 'C' },
+          { x: 500, text: 'D' },
+        ]),
+        ...makeRowSpans(600, [
+          { x: 120, text: 'Illustrative costs only' },
+          { x: 290, text: '1.00' },
+          { x: 360, text: '2.00' },
+          { x: 430, text: '3.00' },
+          { x: 500, text: '4.00' },
+        ]),
+      ],
+    };
+
+    const parsed = parsePdfStatementPages([transactionPage, disclosurePage], 'fictional.pdf');
+    assert.equal(parsed.transactions.length, 1);
+    assert.equal(parsed.transactions[0].amount, -10);
+    assert.equal(parsed.warnings.length, 0);
+
+    const insufficientMarkers: PdfExtractedPage = {
+      ...disclosurePage,
+      spans: disclosurePage.spans.filter(
+        (span) => span.text !== 'Maximum monthly charge' && span.text !== 'Nominal monthly rate'
+      ),
+    };
+    const rejected = parsePdfStatementPages([transactionPage, insufficientMarkers], 'fictional.pdf');
+    assert.equal(rejected.transactions.length, 0);
+    assert.match(rejected.warnings[0], /No rows from this PDF were staged/);
+
+    const mixedPage: PdfExtractedPage = {
+      ...disclosurePage,
+      spans: [
+        ...disclosurePage.spans,
+        ...makeRowSpans(580, [
+          { x: 40, text: '02 Nov 2026' },
+          { x: 120, text: 'FICTIONAL MALFORMED ENTRY' },
+          { x: 350, text: '5.00' },
+          { x: 425, text: '7.00' },
+          { x: 500, text: '92.00' },
+        ]),
+      ],
+    };
+    const mixedRejected = parsePdfStatementPages([transactionPage, mixedPage], 'fictional.pdf');
+    assert.equal(mixedRejected.transactions.length, 0);
+    assert.match(mixedRejected.warnings[0], /No rows from this PDF were staged/);
+  });
+
+  it('still rejects a dated row with multiple non-zero transaction amounts', () => {
+    const pages: PdfExtractedPage[] = [{
+      pageNumber: 1,
+      spans: [
+        ...makeRowSpans(700, [
+          { x: 40, text: 'Date' },
+          { x: 120, text: 'Description' },
+          { x: 350, text: 'Paid Out' },
+          { x: 425, text: 'Paid In' },
+          { x: 500, text: 'Balance' },
+        ]),
+        ...makeRowSpans(680, [
+          { x: 120, text: 'BALANCE BROUGHT FORWARD' },
+          { x: 500, text: '100.00' },
+        ]),
+        ...makeRowSpans(660, [
+          { x: 40, text: '01 Nov 2026' },
+          { x: 120, text: 'FICTIONAL SHOP' },
+          { x: 350, text: '10.00' },
+          { x: 425, text: '3.00' },
+          { x: 500, text: '93.00' },
+        ]),
+      ],
+    }];
+    const parsed = parsePdfStatementPages(pages, 'fictional.pdf');
+    assert.equal(parsed.transactions.length, 0);
+    assert.match(parsed.warnings[0], /No rows from this PDF were staged/);
+  });
 });

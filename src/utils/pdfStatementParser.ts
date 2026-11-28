@@ -163,6 +163,18 @@ const NON_TRANSACTION_ROW_RE =
 const BOILERPLATE_CONTINUATION_RE =
   /\b(page\s+\d+|continued\s+(?:on|from)|sort\s+code|account\s+number|account\s+name|statement\s+date|statement\s+period|sheet\s+no|iban|bic|fscs|prudential\s+regulation|financial\s+conduct|registered\s+office|www\.|https?:\/\/|tel:|telephone|helpline|customer\s+service|mr\s+|mrs\s+|ms\s+|miss\s+|dr\s+)\b/i;
 
+// Some banks append a separate overdraft-cost disclosure after the transaction
+// pages. It has monetary columns but no transaction dates; treating it as a
+// continuation of the last transaction table can create fictitious movements.
+// Require several independent disclosure headings and no transaction-shaped
+// dated rows before excluding an entire page from transaction parsing.
+const OVERDRAFT_DISCLOSURE_MARKERS = [
+  /\bunarranged\s+overdraft\s+interest\b/i,
+  /\bnominal\s+monthly\s+rate\b/i,
+  /\bunpaid\s+transaction\s+fees?\b/i,
+  /\bmaximum\s+monthly\s+charge\b/i,
+];
+
 const CREDIT_CARD_DOC_RE =
   /\b(credit\s+card\s+statement|credit\s+limit|minimum\s+payment|available\s+credit|card\s+number\s+ending)\b/i;
 
@@ -1037,7 +1049,7 @@ export function parsePdfStatementPages(
   const rejectIncomplete = (): ParsedStatementResult => ({
     transactions: [],
     warnings: [
-      'A dated PDF transaction row was incomplete or interrupted. No rows from this PDF were staged; export CSV/OFX if the layout is unsupported.',
+      'A PDF transaction row was incomplete or interrupted. No rows from this PDF were staged; export CSV/OFX if the layout is unsupported.',
     ],
   });
   const rows = groupPdfPagesIntoRows(pages);
@@ -1051,6 +1063,31 @@ export function parsePdfStatementPages(
 
   const fullDocText = rows.map((r) => r.text).join('\n');
   const isCreditCard = CREDIT_CARD_DOC_RE.test(fullDocText);
+  const rowsByPage = new Map<number, PdfRow[]>();
+  for (const row of rows) {
+    const pageRows = rowsByPage.get(row.pageNumber) ?? [];
+    pageRows.push(row);
+    rowsByPage.set(row.pageNumber, pageRows);
+  }
+  const standaloneDisclosurePages = new Set<number>();
+  for (const [pageNumber, pageRows] of rowsByPage) {
+    const pageText = pageRows.map((row) => row.text).join('\n');
+    const disclosureHeadings = OVERDRAFT_DISCLOSURE_MARKERS.filter((marker) =>
+      marker.test(pageText)
+    ).length;
+    if (disclosureHeadings < 3) continue;
+    const hasTransactionHeader = pageRows.some(
+      (row, index) => detectTableHeader(row, pageRows[index + 1], isCreditCard) !== null
+    );
+    const hasDatedMoneyRow = pageRows.some(
+      (row) =>
+        row.cells.slice(0, 2).some((cell) => parseLeadingPdfDate(cell.text) !== null) &&
+        row.cells.some((cell) => parsePdfMoneyCell(cell.text) !== null)
+    );
+    if (!hasTransactionHeader && !hasDatedMoneyRow) {
+      standaloneDisclosurePages.add(pageNumber);
+    }
+  }
   const hasTableHeader = rows.some(
     (row, index) => detectTableHeader(row, rows[index + 1], isCreditCard) !== null
   );
@@ -1096,6 +1133,18 @@ export function parsePdfStatementPages(
 
   for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
     const row = rows[rowIdx];
+
+    if (standaloneDisclosurePages.has(row.pageNumber)) {
+      if (pendingEntry) return rejectIncomplete();
+      // A later page must establish its own table/date context. Never inherit
+      // the last transaction date or running balance across a disclosure.
+      currentDate = null;
+      prevBalance = null;
+      sawTableHeader = false;
+      layout = { isCreditCard };
+      lastPageNumber = row.pageNumber;
+      continue;
+    }
 
     // On page break, clear any dangling pending entry so header lines don't merge into it
     if (row.pageNumber !== lastPageNumber) {
